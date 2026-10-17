@@ -11,21 +11,15 @@ Tous automatisables et sauvegardés avec le projet.
 
 ## Télécharger
 
-Les installeurs sont compilés automatiquement par GitHub Actions et publiés dans
+L'installeur macOS est compilé automatiquement par GitHub Actions et publiés dans
 l'onglet **[Releases](../../releases/latest)** :
 
 | système | fichier |
 |---|---|
 | macOS 11+ (Apple Silicon & Intel) | `frame-X.Y.Z-macos.pkg` — VST3, AU et Standalone, au choix |
-| Windows 10/11 64 bits | `frame-X.Y.Z-windows-setup.exe` — VST3 et Standalone |
-| Windows (portable) | `frame-X.Y.Z-windows.zip` |
 
-Les installeurs ne sont pas signés par un certificat développeur payant :
-
-- **macOS** : clic droit sur le `.pkg` ▸ *Ouvrir*, ou *Réglages Système ▸ Confidentialité
-  et sécurité ▸ Ouvrir quand même*.
-- **Windows** : à l'avertissement SmartScreen, *Informations complémentaires ▸ Exécuter
-  quand même*.
+L'installeur n'est pas signé par un certificat développeur payant : clic droit sur le
+`.pkg` ▸ *Ouvrir*, ou *Réglages Système ▸ Confidentialité et sécurité ▸ Ouvrir quand même*.
 
 Chaque push sur `main` recompile tout et met à jour la release `vX.Y.Z`, où X.Y.Z est la
 `VERSION` du `project(...)` dans `CMakeLists.txt`. Pour une nouvelle version : changez ce
