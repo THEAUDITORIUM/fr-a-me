@@ -15,7 +15,7 @@
 #  bundles et le .pkg sont signés avec ces identités. Sinon : signature ad hoc
 #  (suffisante pour un usage personnel, voir README).
 # ==============================================================================
-set -euo pipefail
+set -Eeuo pipefail      # -E : le piège ERR s'applique aussi dans les fonctions
 
 # En CI, toute erreur devient une annotation lisible dans le résumé du run.
 LOG="$(mktemp)"
