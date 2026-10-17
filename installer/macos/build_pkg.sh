@@ -64,7 +64,9 @@ stage_component () {      # $1 = bundle source, $2 = nom du composant, $3 = doss
     #  être vide, auquel cas il n'y a rien à rendre non relocalisable.)
     local i=0
     while /usr/libexec/PlistBuddy -c "Print :$i" "$WORK/$name.plist" >/dev/null 2>&1; do
-        /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$WORK/$name.plist"
+        # La clé peut manquer (cas du .vst3) : on la supprime si elle existe, puis on l'ajoute.
+        /usr/libexec/PlistBuddy -c "Delete :$i:BundleIsRelocatable" "$WORK/$name.plist" >/dev/null 2>&1 || true
+        /usr/libexec/PlistBuddy -c "Add :$i:BundleIsRelocatable bool false" "$WORK/$name.plist"
         i=$((i + 1))
     done
 
