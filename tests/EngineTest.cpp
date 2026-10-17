@@ -421,6 +421,78 @@ int main (int argc, char** argv)
         if (outDir != juce::File()) { writeWav (outDir.getChildFile ("bruit_avant.wav"), dry); writeWav (outDir.getChildFile ("bruit_color100.wav"), b); }
     }
 
+    // ---- 9. REVERB harmonique + particules ------------------------------------
+    {
+        std::printf ("9. reverb 70 %% sur une salve de bruit de 0.3 s (la mineur)\n");
+        const int len = (int) sr * 6, burst = (int) (0.3 * sr);
+        juce::AudioBuffer<float> b (2, len);
+        b.clear();
+        std::mt19937 rng (9);
+        std::normal_distribution<float> nd (0.0f, 0.2f);
+        for (int n = 0; n < burst; ++n) { const float v = nd (rng); b.setSample (0, n, v); b.setSample (1, n, v); }
+
+        SpectralEngine e; e.prepare (sr, 2); e.setColour (1.0f); e.setReverb (0.7f);
+        runEngine (e, b, 512, aMinor);
+
+        bool finite = true; float peak = 0;
+        for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n)
+        { const float v = b.getSample (c, n); finite &= std::isfinite (v); peak = juce::jmax (peak, std::abs (v)); }
+
+        auto rmsAt = [&] (double t) { return juce::Decibels::gainToDecibels (b.getRMSLevel (0, latency + (int) (t * sr), (int) (0.25 * sr)), -150.0f); };
+        const float t1 = rmsAt (1.0), t3 = rmsAt (3.0), t5 = rmsAt (5.0);
+
+        // corrélation gauche/droite de la queue (entrée mono parfaite)
+        double sxy = 0, sxx = 0, syy = 0;
+        for (int n = latency + (int) sr; n < latency + (int) (3 * sr); ++n)
+        { const double l = b.getSample (0, n), r = b.getSample (1, n); sxy += l * r; sxx += l * l; syy += r * r; }
+        const double lr = sxy / std::sqrt (sxx * syy + 1e-20);
+
+        // part harmonique de la queue (1 s → 3 s)
+        constexpr int order = 15, N = 1 << order;
+        juce::dsp::FFT f (order);
+        std::vector<float> w ((size_t) N * 2, 0.0f);
+        for (int n = 0; n < N; ++n)
+            w[(size_t) n] = b.getSample (0, latency + (int) sr + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+        f.performFrequencyOnlyForwardTransform (w.data(), true);
+        double inKey = 0, total = 0;
+        for (int k = 1; k < N / 2; ++k)
+        {
+            const double hz = k * sr / N;
+            if (hz < 200 || hz > 6000) continue;
+            const double p = (double) w[(size_t) k] * w[(size_t) k], midi = frame::hzToMidi (hz);
+            total += p;
+            if (std::abs (midi - frame::nearestScaleMidi (midi, aMinor)) < 0.25) inKey += p;
+        }
+        const double harm = 100.0 * inKey / (total + 1e-20);
+
+        std::printf ("     queue : +1 s %.1f dB, +3 s %.1f dB, +5 s %.1f dB ; harmonique %.0f %% ; corrélation G/D %.2f ; crête %.2f\n",
+                     t1, t3, t5, harm, lr, peak);
+        check (finite && peak < 1.5f, "reverb : pas de valeur invalide ni d'emballement");
+        check (t1 > -50.0f && t3 < t1 && t5 < t3, "reverb : queue présente qui s'éteint");
+        check (harm > 60.0, "reverb : queue accordée sur la gamme (bruit → notes)");
+        check (lr < 0.8, "reverb : queue large (gauche et droite décorrélées)");
+        if (outDir != juce::File()) writeWav (outDir.getChildFile ("reverb_particules_la_mineur.wav"), b);
+    }
+
+    // ---- 10. Robustesse : COLOR et REVERB qui bougent à chaque bloc -----------
+    {
+        std::printf ("10. automation brutale de COLOR / REVERB / gamme (20 s)\n");
+        SpectralEngine e; e.prepare (sr, 2);
+        juce::AudioBuffer<float> b (2, 256);
+        std::mt19937 rng (2); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+        bool finite = true;
+        for (int blk = 0; blk < (int) (20 * sr / 256); ++blk)
+        {
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) b.setSample (c, n, 0.4f * u (rng));
+            e.setColour (2.0f * (float) ((blk * 7919) % 101) / 100.0f);
+            e.setReverb ((float) ((blk * 104729) % 101) / 100.0f);
+            e.setScaleMask (frame::scaleMask ((blk / 50) % 12, (blk / 120) % 2 ? frame::Mode::minor : frame::Mode::major));
+            e.process (b);
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) finite &= std::isfinite (b.getSample (c, n));
+        }
+        check (finite, "aucune valeur invalide sous automation brutale");
+    }
+
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");
     return failures == 0 ? 0 : 1;
 }

@@ -23,6 +23,7 @@ namespace ParamIDs
 {
     inline constexpr const char* mix   = "mix";
     inline constexpr const char* color = "color";
+    inline constexpr const char* reverb = "reverb";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
 }
@@ -35,7 +36,7 @@ public:
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override {}
+    void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
     using AudioProcessor::processBlock;          // la version double reste celle de JUCE
@@ -51,7 +52,7 @@ public:
     bool acceptsMidi() const override  { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return SpectralEngine::resonanceT60Seconds + 0.5; }   // queue de résonance
+    double getTailLengthSeconds() const override { return SpectralEngine::maxTailSeconds; }   // queues de résonance / reverb
 
     int getNumPrograms() override    { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -88,7 +89,11 @@ private:
 
     std::atomic<float>* mixParam  = nullptr;
     std::atomic<float>* colorParam = nullptr;
+    std::atomic<float>* reverbParam = nullptr;
     float colourSmoothed = 1.0f;          // COLOR lissé de bloc en bloc
+    float reverbSmoothed = 0.3f;          // REVERB lissé de bloc en bloc
+    std::atomic<bool> prepared { false }; // prepareToPlay a été appelé
+    bool engineNeedsReset = false;        // auto-réparation après une valeur invalide
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* noteParam = nullptr;
 

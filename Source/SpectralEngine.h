@@ -44,6 +44,7 @@
          dans le domaine spectral (noyau de Hann exact, phase continue). Les
          régions tonales recalées sont aussi légèrement amplifiées (+2 dB).
          Bruit et transitoires n'excitent pas les résonateurs.
+      6b. REVERB : queue spectrale accordée + particules harmoniques.
       7. IFFT, fenêtre de synthèse de Hann, overlap-add.
 
     Contraintes temps réel : toutes les mémoires sont allouées dans prepare().
@@ -114,6 +115,17 @@ public:
                     T60 ≈ 4 s). */
     void setColour (float colourAmount) noexcept;
 
+    /** REVERB (0…1) : réverbe spectrale accordée sur la gamme (la queue ne
+        garde que les fréquences des notes, phases diffuses et décorrélées
+        gauche/droite, aigus amortis, T60 de 2 à 10 s) + particules
+        chromatiques harmoniques : petits grains sinusoïdaux (60–250 ms) sur
+        des notes de la gamme dans l'aigu, déclenchés par l'énergie du son et
+        de la queue, placés aléatoirement dans l'espace stéréo. */
+    void setReverb (float amount) noexcept { reverbAmount = juce::jlimit (0.0f, 1.0f, amount); }
+
+    /** Plus longue queue possible (reverb à 100 %), pour l'hôte. */
+    static constexpr double maxTailSeconds = 11.0;
+
     /** Réglage direct de la queue de résonance (tests). */
     void setResonanceAmount (float amount) noexcept { resonanceAmount = juce::jlimit (0.0f, 2.0f, amount); }
 
@@ -135,6 +147,8 @@ private:
     void publishVisualFrame (int numChannelsUsed) noexcept;
     void applyColourComb (int numChannelsUsed) noexcept;
     void computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept;
+    void applyReverbAndParticles (int numChannelsUsed) noexcept;
+    float nextRandom() noexcept;                  // 0…1, générateur rapide sans allocation
     void updateResonators() noexcept;
     void addResonators (int numChannelsUsed) noexcept;
     void addSinusoid (std::vector<Complex>& Z, float binPos, float amplitude, float phase0) const noexcept;
@@ -203,6 +217,26 @@ private:
     std::array<float, numResonators> resEnergy {}, resExcite {};
     std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhase {};
     std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhaseOffset {};
+
+    // --- reverb harmonique + particules --------------------------------------
+    float reverbAmount = 0.0f;
+    std::vector<std::vector<float>> revMag;       // énergie de la queue, par canal et par bin
+    std::vector<std::vector<float>> revPhase;     // phase courante, par canal et par bin
+    std::vector<float> revHarmonic;               // poids « note de la gamme » par bin (0…1)
+    uint16_t revMask = 0xFFFF;
+    uint32_t rngState = 0x2545F491u;
+    float inputLevel = 0.0f;                      // suiveur d'énergie de l'entrée
+
+    struct Particle
+    {
+        bool  active = false;
+        float hz = 0.0f, amp = 0.0f;
+        int   age = 0, length = 1;
+        float gainL = 0.7f, gainR = 0.7f;
+        float phase[2] {};
+    };
+    static constexpr int maxParticles = 40;
+    std::array<Particle, maxParticles> particles {};
 
     // --- visualisation --------------------------------------------------------
     LockFreeQueue<SpectralFrameInfo, 32> visualQueue;

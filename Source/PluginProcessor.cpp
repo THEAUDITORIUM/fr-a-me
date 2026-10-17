@@ -17,6 +17,7 @@ FrameAudioProcessor::FrameAudioProcessor()
 {
     mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
     colorParam = apvts.getRawParameterValue (ParamIDs::color);
+    reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
 }
@@ -45,11 +46,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 3. MODE : major / minor.
+    // 3. REVERB : 0–100 %, défaut 30 %. Réverbe spectrale accordée sur la
+    //    gamme + particules harmoniques (petits grains de notes de la gamme).
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::reverb, 1 }, "reverb",
+        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 30.0f,
+        AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
+            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
+
+    // 4. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
 
-    // 4. NOTE : tonique parmi les 12 notes.
+    // 5. NOTE : tonique parmi les 12 notes.
     StringArray notes;
     for (auto* n : frame::noteNames)
         notes.add (n);
@@ -70,8 +81,10 @@ bool FrameAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 
 void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    prepared = false;
+    if (! (sampleRate > 0.0)) sampleRate = 44100.0;    // hôte qui annonce 0 Hz : valeur sûre
     currentSampleRate = sampleRate;
-    maxChunk = juce::jmax (32, samplesPerBlock);
+    maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
     engine.prepare (sampleRate, 2);
     setLatencySamples (engine.getLatencySamples());   // compensation de latence par l'hôte
@@ -89,6 +102,30 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     samplesPerWaveSlice = engine.getFftSize() / 8;     // l'onde défile à la même vitesse que le spectrogramme
     currentSlice = {};
     sliceCount = 0;
+    engineNeedsReset = false;
+    prepared = true;
+}
+
+void FrameAudioProcessor::releaseResources()
+{
+    prepared = false;
+}
+
+namespace
+{
+    /** Limiteur doux de sécurité : transparent sous −1 dBFS, puis courbe
+        tanh qui plafonne la sortie à 0 dBFS (les renforts harmoniques ne
+        peuvent pas faire saturer l'hôte). Une valeur invalide devient 0. */
+    inline float safetyLimit (float y, bool& invalid) noexcept
+    {
+        if (! std::isfinite (y)) { invalid = true; return 0.0f; }
+        constexpr float knee = 0.891f, room = 1.0f - knee;
+        const float a = std::abs (y);
+        if (a <= knee) return y;
+        return std::copysign (knee + room * std::tanh ((a - knee) / room), y);
+    }
+
+    inline float finiteOrZero (float v) noexcept { return std::isfinite (v) ? v : 0.0f; }
 }
 
 uint16_t FrameAudioProcessor::getCurrentScaleMask() const noexcept
@@ -106,17 +143,41 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const int numChannels = juce::jmin (getTotalNumInputChannels(), getTotalNumOutputChannels(), 2);
     for (int c = numChannels; c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, buffer.getNumSamples());
-    if (numChannels <= 0)
+
+    // Certains hôtes appellent processBlock avant prepareToPlay, ou avec un
+    // bloc vide : on laisse alors passer le son sans y toucher.
+    if (numChannels <= 0 || ! prepared || buffer.getNumSamples() <= 0)
         return;
 
-    engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
-    mixSmoothed.setTargetValue (mixParam->load() * 0.01f);
+    // Auto-réparation : si une valeur invalide est sortie au bloc précédent,
+    // le moteur repart d'un état propre (sans allocation).
+    if (engineNeedsReset)
+    {
+        engine.reset();
+        dryDelay.clear();
+        colourSmoothed = colorParam->load() * 0.01f;
+        reverbSmoothed = reverbParam->load() * 0.01f;
+        engineNeedsReset = false;
+    }
 
-    // COLOR : lissage exponentiel (~60 ms) appliqué une fois par bloc.
-    const float blockSeconds = (float) buffer.getNumSamples() / (float) getSampleRate();
-    const float k = 1.0f - std::exp (-blockSeconds / 0.06f);
-    colourSmoothed += (colorParam->load() * 0.01f - colourSmoothed) * k;
+    engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
+    mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
+
+    // COLOR et REVERB : lissage exponentiel (~60 ms), une fois par bloc. La
+    // fréquence d'échantillonnage vient de prepareToPlay (jamais 0 ici).
+    const double sr = currentSampleRate.load();
+    const float blockSeconds = (float) ((double) buffer.getNumSamples() / (sr > 0.0 ? sr : 44100.0));
+    const float k = juce::jlimit (0.0f, 1.0f, 1.0f - std::exp (-blockSeconds / 0.06f));
+
+    const float colourTarget = juce::jlimit (0.0f, 2.0f, finiteOrZero (colorParam->load()) * 0.01f);
+    colourSmoothed += (colourTarget - colourSmoothed) * k;
+    if (! std::isfinite (colourSmoothed)) colourSmoothed = colourTarget;
     engine.setColour (colourSmoothed);
+
+    const float reverbTarget = juce::jlimit (0.0f, 1.0f, finiteOrZero (reverbParam->load()) * 0.01f);
+    reverbSmoothed += (reverbTarget - reverbSmoothed) * k;
+    if (! std::isfinite (reverbSmoothed)) reverbSmoothed = reverbTarget;
+    engine.setReverb (reverbSmoothed);
 
     // L'hôte peut envoyer un bloc plus grand qu'annoncé : on découpe.
     for (int start = 0; start < buffer.getNumSamples(); start += maxChunk)
@@ -130,8 +191,12 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     // Copie de l'entrée : dryBuffer garde le signal brut, wetBuffer sera traité.
     for (int c = 0; c < numChannels; ++c)
     {
-        dryBuffer.copyFrom (c, 0, buffer, c, startSample, numSamples);
-        wetBuffer.copyFrom (c, 0, buffer, c, startSample, numSamples);
+        // Entrée assainie : une valeur invalide venant de l'hôte devient 0.
+        float* d = dryBuffer.getWritePointer (c);
+        const float* in = buffer.getReadPointer (c, startSample);
+        for (int i = 0; i < numSamples; ++i)
+            d[i] = finiteOrZero (in[i]);
+        wetBuffer.copyFrom (c, 0, dryBuffer, c, 0, numSamples);
     }
 
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
@@ -139,6 +204,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     engine.process (wetView);
 
     const int delayLength = dryDelay.getNumSamples();
+    bool invalid = false;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -156,7 +222,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             const float delayed = line[dryDelayWritePos];
             line[dryDelayWritePos] = x;
 
-            const float y = delayed + m * (wetBuffer.getSample (c, i) - delayed);
+            const float y = safetyLimit (delayed + m * (wetBuffer.getSample (c, i) - delayed), invalid);
             buffer.setSample (c, startSample + i, y);
 
             inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
@@ -179,6 +245,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             sliceCount = 0;
         }
     }
+
+    if (invalid)
+        engineNeedsReset = true;     // le moteur sera réinitialisé au prochain bloc
 }
 
 void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -188,7 +257,7 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
     // pour une reprise sans résidu.
     juce::ScopedNoDenormals noDenormals;
     const int numChannels = juce::jmin (getTotalNumInputChannels(), getTotalNumOutputChannels(), 2);
-    if (numChannels <= 0)
+    if (numChannels <= 0 || ! prepared || buffer.getNumSamples() <= 0)
         return;
 
     const int delayLength = dryDelay.getNumSamples();
@@ -197,7 +266,12 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
     {
         const int n = juce::jmin (maxChunk, buffer.getNumSamples() - start);
         for (int c = 0; c < numChannels; ++c)
-            wetBuffer.copyFrom (c, 0, buffer, c, start, n);
+        {
+            float* w = wetBuffer.getWritePointer (c);
+            const float* in = buffer.getReadPointer (c, start);
+            for (int i = 0; i < n; ++i)
+                w[i] = finiteOrZero (in[i]);
+        }
         juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, n);
         engine.setScaleMask (getCurrentScaleMask());
         engine.process (wetView);
@@ -207,7 +281,7 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
             for (int c = 0; c < numChannels; ++c)
             {
                 float* line = dryDelay.getWritePointer (c);
-                const float x = buffer.getSample (c, start + i);
+                const float x = finiteOrZero (buffer.getSample (c, start + i));
                 buffer.setSample (c, start + i, line[dryDelayWritePos]);
                 line[dryDelayWritePos] = x;
             }

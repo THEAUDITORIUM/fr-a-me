@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque
 hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
 transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
 
-Quatre contrôles : **mix** (0–100 %), **color** (0–200 %, comme sur Chroma), **mode** (major / minor), **note** (tonique, 12 notes).
+Cinq contrôles : **mix** (0–100 %), **color** (0–200 %, comme sur Chroma), **reverb** (0–100 %, réverbe harmonique + particules), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -127,6 +127,8 @@ Résultats obtenus pendant le développement (48 kHz) :
 | la4 tenu (la mineur) : octave / quinte / tierce ajoutées | −25 / −26 / −29 dB ; la# hors gamme à −67 dB |
 | queue de résonance après l'arrêt (COLOR 200 %) | −27 dB à 0.5 s, −50 dB à 2 s, −74 dB à 3.6 s |
 | bruit blanc, COLOR 100 % (la mineur) | notes +5 dB, entre les notes −9 dB, niveau global −0.6 dB |
+| salve de bruit, REVERB 70 % | queue accordée à 99 % sur la gamme, corrélation G/D 0.36, −33 dB à 1 s → −70 dB à 5 s |
+| automation brutale COLOR / REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -195,8 +197,22 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
 
-**COLOR** : de 0 à 100 % il dose le peigne (100 % = valeur calée sur Chroma) ; au-delà de
-100 % il ajoute en plus la queue de résonance harmonique décrite ci-dessous (« + tail »).
+**COLOR** : de 0 à 100 % il dose le peigne (100 % = valeur calée sur Chroma). Au-delà de
+100 %, on va plus loin que Chroma : le peigne se creuse encore, le recalage se resserre (le
+désaccord gardé passe de la moitié à zéro à 200 %) et la queue de résonance harmonique
+décrite ci-dessous s'ajoute (« +tail »).
+
+**REVERB** : réverbe spectrale accordée sur la gamme. Seules les fréquences des notes
+nourrissent la queue (un bruit ou un clap devient un nuage de notes justes), phases
+diffuses et décorrélées gauche/droite, aigus amortis, T60 de 2 s à 10 s selon le réglage.
+Elle s'accompagne de **particules chromatiques harmoniques** : petits grains sinusoïdaux
+(60–250 ms) sur des notes de la gamme dans l'aigu, déclenchés par l'énergie du son et de
+la queue, placés au hasard dans l'espace stéréo — une poussière scintillante dans la tonalité.
+
+**Sécurité** : entrée et sortie assainies (aucune valeur invalide ne peut sortir ni
+contaminer le mixeur de l'hôte), auto-réinitialisation du moteur si besoin, limiteur doux
+transparent sous −1 dBFS qui plafonne la sortie à 0 dBFS, appels de l'hôte avant
+`prepareToPlay` ou avec des blocs vides gérés.
 
 **Résonance harmonique (COLOR > 100 %).** Chaque partiel tonal recalé excite une banque de
 résonateurs accordés sur les notes de la gamme (E1 → E7). Un résonateur excité sonne sa
@@ -238,7 +254,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **color** (double-clic = 100 % ; « + tail » au-delà), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **mix** (double-clic = 100 %), **color** (double-clic = 100 % ; « +tail » au-delà), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

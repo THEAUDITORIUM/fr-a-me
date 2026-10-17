@@ -41,8 +41,12 @@ private:
     SpectrogramBand spectrumBand;
     PartialScore partialBand;
 
-    juce::Slider mixKnob, colorKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, colorAttachment;
+    juce::Slider mixKnob, colorKnob, reverbKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, colorAttachment, reverbAttachment;
+
+    void setupKnob (juce::Slider& knob, const juce::String& name, double resetValue,
+                    juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
+                    const char* paramID);
     ModeToggle modeToggle;
     NoteRow noteRow;
 
@@ -53,10 +57,11 @@ private:
     const juce::Rectangle<float> outputArea   { 80.0f, 214.0f, 840.0f,  70.0f };
     const juce::Rectangle<float> spectrumArea { 80.0f, 310.0f, 840.0f, 140.0f };
     const juce::Rectangle<float> partialArea  { 80.0f, 476.0f, 840.0f, 100.0f };
-    const juce::Rectangle<int>   knobArea     { 132, 628, 96, 96 };
-    const juce::Rectangle<int>   colorArea    { 272, 628, 96, 96 };
-    const juce::Rectangle<int>   modeArea     { 412, 654, 180, 36 };
-    const juce::Rectangle<int>   noteArea     { 620, 648, 300, 50 };
+    const juce::Rectangle<int>   knobArea     { 116, 632, 88, 88 };
+    const juce::Rectangle<int>   colorArea    { 236, 632, 88, 88 };
+    const juce::Rectangle<int>   reverbArea   { 356, 632, 88, 88 };
+    const juce::Rectangle<int>   modeArea     { 470, 656, 150, 36 };
+    const juce::Rectangle<int>   noteArea     { 640, 648, 280, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };
