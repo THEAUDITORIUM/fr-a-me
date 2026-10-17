@@ -193,7 +193,7 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   n'est pas touché (son désaccord naturel reste) ; sinon il est déplacé d'un nombre entier
   de demi-tons vers la note de la gamme voisine, en gardant la moitié de son écart en
   cents (mesuré : sol#+41 → la+27, do#−21 → ré−10, la#−19 → la−18).
-- *Peigne COLOR* : renfort étroit sur les fréquences des notes de la gamme et creux entre
+- *Peigne harmonique* : renfort étroit sur les fréquences des notes de la gamme et creux entre
   elles, de ~250 Hz à 12 kHz, niveau global compensé, sans filtre qui sonne. Sur le même
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
