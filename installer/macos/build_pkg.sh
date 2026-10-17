@@ -60,7 +60,13 @@ stage_component () {      # $1 = bundle source, $2 = nom du composant, $3 = doss
 
     # Composant non relocalisable : toujours installé à l'emplacement prévu.
     pkgbuild --analyze --root "$WORK/root-$name" "$WORK/$name.plist"
-    /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$WORK/$name.plist"
+    # (pkgbuild ne reconnaît pas toujours un .vst3 comme bundle : la liste peut
+    #  être vide, auquel cas il n'y a rien à rendre non relocalisable.)
+    local i=0
+    while /usr/libexec/PlistBuddy -c "Print :$i" "$WORK/$name.plist" >/dev/null 2>&1; do
+        /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$WORK/$name.plist"
+        i=$((i + 1))
+    done
 
     pkgbuild --root "$WORK/root-$name" \
              --component-plist "$WORK/$name.plist" \
