@@ -1,0 +1,184 @@
+# ==============================================================================
+#  fr(a)me — compilation et installeurs
+#
+#  À chaque push sur main  : compile Windows + macOS, lance les tests du moteur,
+#                             et dépose les installeurs dans l'onglet « Actions »
+#                             (section « Artifacts » du run).
+#  À chaque tag vX.Y.Z      : idem + publie une release GitHub avec les fichiers :
+#                               frame-X.Y.Z-macos.pkg
+#                               frame-X.Y.Z-windows-setup.exe
+#                               frame-X.Y.Z-windows.zip
+# ==============================================================================
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ----------------------------------------------------------------------------
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Lire la version (tag ou CMakeLists.txt)
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF#refs/tags/v}"
+          else
+            v="$(sed -n 's/^project(FRAME VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "version : $v"
+
+  # ----------------------------------------------------------------------------
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dépendances Linux de JUCE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxext-dev libxrender-dev libxcomposite-dev \
+            libfreetype-dev libfontconfig1-dev libgl1-mesa-dev
+      - name: Compiler le banc de test
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFRAME_BUILD_TESTS=ON
+          cmake --build build --target FrameEngineTest
+      - name: Lancer les tests du moteur spectral
+        run: |
+          exe="$(find build -type f -name FrameEngineTest -perm -u+x | head -1)"
+          "$exe"
+
+  # ----------------------------------------------------------------------------
+  macos:
+    needs: version
+    runs-on: macos-14
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurer (Xcode, universel arm64 + x86_64)
+        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Compiler
+        run: cmake --build build --config Release --parallel 4 -- -quiet
+
+      - name: Vérifier les architectures
+        run: |
+          lipo -info "build/Frame_artefacts/Release/VST3/frame.vst3/Contents/MacOS/frame"
+          lipo -info "build/Frame_artefacts/Release/AU/frame.component/Contents/MacOS/frame"
+
+      - name: Valider l'Audio Unit (auval)
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/Frame_artefacts/Release/AU/frame.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aufx Frm1 Frma
+
+      - name: Construire le .pkg
+        run: installer/macos/build_pkg.sh build/Frame_artefacts/Release "$VERSION" "dist/frame-$VERSION-macos.pkg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-${{ env.VERSION }}-macos
+          path: dist/*.pkg
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurer (Visual Studio 2022, x64)
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Compiler
+        run: cmake --build build --config Release --parallel
+
+      - name: Installer Inno Setup si absent
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Construire l'installeur (.exe) et le zip
+        shell: pwsh
+        run: |
+          $art = Resolve-Path "build\Frame_artefacts\Release"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $dist = Resolve-Path dist
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+              "/DAppVersion=$env:VERSION" "/DArtefacts=$art" "/DOutputDir=$dist" `
+              installer\windows\frame.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Zip « portable » : VST3 + standalone + mode d'emploi.
+          $z = "dist\zip\frame-$env:VERSION-windows"
+          New-Item -ItemType Directory -Force $z | Out-Null
+          Copy-Item -Recurse "$art\VST3\frame.vst3" $z
+          Copy-Item "$art\Standalone\frame.exe" $z
+          Set-Content -Encoding utf8 "$z\LISEZMOI.txt" @"
+          fr(a)me $env:VERSION
+          - Copiez le dossier frame.vst3 dans C:\Program Files\Common Files\VST3\
+          - frame.exe est la version autonome (standalone).
+          "@
+          Compress-Archive -Path "$z\*" -DestinationPath "dist\frame-$env:VERSION-windows.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-${{ env.VERSION }}-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, tests, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: fr(a)me ${{ needs.version.outputs.version }}
+          files: dist/*
+          body: |
+            **fr(a)me ${{ needs.version.outputs.version }}** — harmoniseur spectral (VST3 · AU · Standalone)
+
+            | système | fichier |
+            |---|---|
+            | macOS 11+ (Apple Silicon & Intel) | `frame-${{ needs.version.outputs.version }}-macos.pkg` |
+            | Windows 10/11 64 bits — installeur | `frame-${{ needs.version.outputs.version }}-windows-setup.exe` |
+            | Windows — portable | `frame-${{ needs.version.outputs.version }}-windows.zip` |
+
+            Les installeurs ne sont pas signés par un certificat développeur :
+            - **macOS** : clic droit sur le .pkg ▸ *Ouvrir* (ou Réglages Système ▸ Confidentialité et sécurité ▸ *Ouvrir quand même*).
+            - **Windows** : SmartScreen ▸ *Informations complémentaires* ▸ *Exécuter quand même*.
