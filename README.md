@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque
 hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
 transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
 
-Cinq contrôles : **mix** (0–100 %), **color** (0–200 %, comme sur Chroma), **reverb** (0–100 %, réverbe harmonique + particules), **mode** (major / minor), **note** (tonique, 12 notes).
+Cinq contrôles : **mix** (0–100 %), **color** (0–100 %, comme sur Chroma), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -124,10 +124,10 @@ Résultats obtenus pendant le développement (48 kHz) :
 | changement de gamme pendant la lecture | aucune discontinuité |
 | accord de scies désaccordées (pad), COLOR 100 % | énergie dont le demi-ton est dans la gamme : 66 % → 95 % |
 | percussions : enveloppe 2 ms entrée/sortie | corrélation 0.98 (attaques conservées) |
-| la4 tenu (la mineur) : octave / quinte / tierce ajoutées | −25 / −26 / −29 dB ; la# hors gamme à −67 dB |
-| queue de résonance après l'arrêt (COLOR 200 %) | −27 dB à 0.5 s, −50 dB à 2 s, −74 dB à 3.6 s |
-| bruit blanc, COLOR 100 % (la mineur) | notes +5 dB, entre les notes −9 dB, niveau global −0.6 dB |
-| salve de bruit, REVERB 70 % | queue accordée à 99 % sur la gamme, corrélation G/D 0.36, −33 dB à 1 s → −70 dB à 5 s |
+| la3 tenu, COLOR 100 % : harmoniques justes | ×2 à −9 dB, ×3 (mi) à −12 dB, ×4 à −14 dB ; la# hors gamme à −55 dB |
+| bruit blanc, COLOR 100 % (la mineur) | notes +6 dB, entre les notes −11 dB, niveau global −0.6 dB |
+| salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 96 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
+| REVERB 100 % sur 40 s de bruit continu | niveau stable (pas d'emballement du nuage réinjecté) |
 | automation brutale COLOR / REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
@@ -142,7 +142,8 @@ frame/
 ├── CMakeLists.txt            projet (JUCE téléchargé automatiquement)
 ├── Source/
 │   ├── PluginProcessor.*     paramètres (APVTS), latence, mix dry/wet, état, bypass
-│   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, OLA
+│   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
+│   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
@@ -197,32 +198,25 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
 
-**COLOR** : de 0 à 100 % il dose le peigne (100 % = valeur calée sur Chroma). Au-delà de
-100 %, on va plus loin que Chroma : le peigne se creuse encore, le recalage se resserre (le
-désaccord gardé passe de la moitié à zéro à 200 %) et la queue de résonance harmonique
-décrite ci-dessous s'ajoute (« +tail »).
+**COLOR** (0–100 %) dose à la fois le peigne harmonique (100 % : +5.5 dB sur les notes,
+−8 dB entre elles, un peu plus marqué que Chroma) et les **harmoniques justes** : chaque
+partiel recalé reçoit son octave (×2), sa double octave (×4) et sa douzième (×3) quand la
+quinte est dans la gamme, en phase avec lui. Elles naissent et meurent avec la note : aucune
+queue, transitoires intacts.
 
-**REVERB** : réverbe spectrale accordée sur la gamme. Seules les fréquences des notes
-nourrissent la queue (un bruit ou un clap devient un nuage de notes justes), phases
-diffuses et décorrélées gauche/droite, aigus amortis, T60 de 2 s à 10 s selon le réglage.
-Elle s'accompagne de **particules chromatiques harmoniques** : petits grains sinusoïdaux
-(60–250 ms) sur des notes de la gamme dans l'aigu, déclenchés par l'énergie du son et de
-la queue, placés au hasard dans l'espace stéréo — une poussière scintillante dans la tonalité.
+**REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
+(matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
+amortis, pré-délai, T60 de 1.5 s à 12 s. Un **nuage granulaire** vit *dans* la réverbe :
+des grains de 80 à 350 ms prélevés dans la queue, à l'unisson ou à l'octave (au-dessus ou
+en dessous), placés au hasard dans l'espace stéréo, puis réinjectés dans la réverbe où ils
+se fondent. La réverbe est placée **avant** le moteur harmonique : toute la queue, grains
+compris, est ensuite recalée, enrichie et peignée → une réverbe entièrement dans la
+tonalité. Niveau normalisé : la queue ne s'emballe pas, même à 100 % sur un son tenu.
 
 **Sécurité** : entrée et sortie assainies (aucune valeur invalide ne peut sortir ni
 contaminer le mixeur de l'hôte), auto-réinitialisation du moteur si besoin, limiteur doux
 transparent sous −1 dBFS qui plafonne la sortie à 0 dBFS, appels de l'hôte avant
 `prepareToPlay` ou avec des blocs vides gérés.
-
-**Résonance harmonique (COLOR > 100 %).** Chaque partiel tonal recalé excite une banque de
-résonateurs accordés sur les notes de la gamme (E1 → E7). Un résonateur excité sonne sa
-note avec 5 harmoniques et appelle aussi l'octave, la tierce et la quinte *de la gamme*
-au-dessus : l'harmonie se renforce en accords dans la tonalité. Montée douce (~90 ms),
-extinction lente (T60 ≈ 4 s), léger désaccord gauche/droite : une queue ambiante, large,
-qui ne joue que des notes justes. Les régions tonales recalées gagnent aussi ~2 dB.
-Le bruit et les attaques n'excitent pas les résonateurs, les drums restent secs.
-Les résonateurs sont synthétisés directement dans le spectre (noyau de Hann exact,
-phase continue), sans coût notable.
 
 **Resynthèse.** IFFT, fenêtre de synthèse de Hann, overlap-add normalisé
 (reconstruction parfaite quand rien n'est déplacé).
@@ -254,7 +248,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **color** (double-clic = 100 % ; « +tail » au-delà), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **mix** (double-clic = 100 %), **color** (double-clic = 100 %), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

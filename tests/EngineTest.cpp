@@ -16,6 +16,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "../Source/SpectralEngine.h"
 #include "../Source/Scale.h"
+#include "../Source/AmbientReverb.h"
 
 #include <cstdio>
 #include <random>
@@ -320,52 +321,6 @@ int main (int argc, char** argv)
         }
     }
 
-    // ---- 7. Résonance harmonique : accord dans la gamme + queue ambiante -----
-    {
-        std::printf ("7. résonance harmonique (la4 tenu 1 s puis silence, la mineur)\n");
-        const int len = (int) sr * 5, stop = (int) sr;
-        juce::AudioBuffer<float> b (2, len);
-        b.clear();
-        sine (b, 440.0, 0.4f, 0, stop);
-        for (int n = stop - 480; n < stop; ++n)               // fin du sinus en fondu (pas de clic)
-            for (int c = 0; c < 2; ++c) b.setSample (c, n, b.getSample (c, n) * (float) (stop - n) / 480.0f);
-
-        SpectralEngine e; e.prepare (sr, 2);
-        e.setColour (0.0f); e.setResonanceAmount (1.0f);   // queue seule, mesurable
-        runEngine (e, b, 512, aMinor);
-
-        bool finite = true; float peak = 0.0f;
-        for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n)
-        { const float v = b.getSample (c, n); finite &= std::isfinite (v); peak = juce::jmax (peak, std::abs (v)); }
-
-        // Niveau des notes de l'accord pendant la note tenue (fenêtre 0.5–1 s, réalignée)
-        auto bandLevel = [&] (int start, double hz)
-        {
-            constexpr int order = 14, N = 1 << order;
-            juce::dsp::FFT f (order);
-            std::vector<float> w ((size_t) N * 2, 0.0f);
-            for (int n = 0; n < N; ++n)
-                w[(size_t) n] = b.getSample (0, start + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
-            f.performFrequencyOnlyForwardTransform (w.data(), true);
-            const int k = (int) std::lround (hz * N / sr);
-            float m = 0; for (int j = k - 3; j <= k + 3; ++j) m = juce::jmax (m, w[(size_t) j]);
-            return juce::Decibels::gainToDecibels (m / (N * 0.25f), -150.0f);
-        };
-        const int hold = latency + (int) (0.6 * sr);
-        const float a4 = bandLevel (hold, 440.0), a5 = bandLevel (hold, 880.0),
-                    e5 = bandLevel (hold, 659.26), c5 = bandLevel (hold, 523.25), bb = bandLevel (hold, 466.16);
-        std::printf ("     pendant : la4 %.1f dB  la5 %.1f  mi5 (quinte) %.1f  do5 (tierce) %.1f  | la#4 (hors gamme) %.1f\n", a4, a5, e5, c5, bb);
-
-        auto rms = [&] (double t0) { return juce::Decibels::gainToDecibels (b.getRMSLevel (0, latency + (int) (t0 * sr), (int) (0.2 * sr)), -150.0f); };
-        const float r05 = rms (1.5), r25 = rms (3.0), r45 = rms (4.6);
-        std::printf ("     queue après l'arrêt : +0.5 s %.1f dB, +2 s %.1f dB, +3.6 s %.1f dB ; crête %.2f\n", r05, r25, r45, peak);
-
-        check (finite && peak < 1.0f, "pas de saturation ni de valeur invalide");
-        check (a5 > -45.0f && e5 > -45.0f && c5 > -50.0f && bb < c5 - 25.0f, "octave, quinte et tierce de la gamme renforcées, rien hors gamme");
-        check (r05 > -40.0f && r25 < r05 - 6.0f && r45 < r25, "queue ambiante qui s'éteint progressivement");
-        if (outDir != juce::File()) writeWav (outDir.getChildFile ("resonance_la_mineur.wav"), b);
-    }
-
     // ---- 8. Peigne COLOR : notes de la gamme renforcées, niveau conservé -------
     {
         std::printf ("8. peigne COLOR 100 %% sur bruit blanc (la mineur)\n");
@@ -421,33 +376,67 @@ int main (int argc, char** argv)
         if (outDir != juce::File()) { writeWav (outDir.getChildFile ("bruit_avant.wav"), dry); writeWav (outDir.getChildFile ("bruit_color100.wav"), b); }
     }
 
-    // ---- 9. REVERB harmonique + particules ------------------------------------
+    // ---- 7. Harmoniques justes ----------------------------------------------
     {
-        std::printf ("9. reverb 70 %% sur une salve de bruit de 0.3 s (la mineur)\n");
-        const int len = (int) sr * 6, burst = (int) (0.3 * sr);
+        std::printf ("7. harmoniques justes : la3 (220 Hz) tenu, COLOR 100 %% (la mineur)\n");
+        const int len = (int) sr * 3;
+        juce::AudioBuffer<float> b (2, len);
+        b.clear();
+        sine (b, 220.0, 0.3f);
+        SpectralEngine e; e.prepare (sr, 2); e.setColour (1.0f);
+        runEngine (e, b, 512, aMinor);
+
+        auto bandLevel = [&] (double hz)
+        {
+            constexpr int order = 15, N = 1 << order;
+            juce::dsp::FFT f (order);
+            std::vector<float> w ((size_t) N * 2, 0.0f);
+            for (int n = 0; n < N; ++n)
+                w[(size_t) n] = b.getSample (0, (int) sr + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+            f.performFrequencyOnlyForwardTransform (w.data(), true);
+            const int k = (int) std::lround (hz * N / sr);
+            float m = 0; for (int j = k - 4; j <= k + 4; ++j) m = juce::jmax (m, w[(size_t) j]);
+            return juce::Decibels::gainToDecibels (m / (N * 0.25f), -150.0f);
+        };
+        const float f1 = bandLevel (220), f2 = bandLevel (440), f3 = bandLevel (660), f4 = bandLevel (880), off = bandLevel (233.08);
+        std::printf ("     la3 %.1f dB | la4 (x2) %.1f | mi5 (x3) %.1f | la5 (x4) %.1f | la#3 (hors gamme) %.1f\n", f1, f2, f3, f4, off);
+        check (f2 > f1 - 14.0f && f3 > f1 - 20.0f && f4 > f1 - 24.0f, "octave, douzième et double octave ajoutées");
+        check (off < f1 - 50.0f, "rien hors gamme");
+    }
+
+    // ---- 9. REVERB ambient + nuage granulaire, harmonisée par le moteur ------
+    {
+        std::printf ("9. reverb 70 %% puis moteur, salve de bruit 0.3 s (la mineur)\n");
+        const int len = (int) sr * 8, burst = (int) (0.3 * sr);
         juce::AudioBuffer<float> b (2, len);
         b.clear();
         std::mt19937 rng (9);
         std::normal_distribution<float> nd (0.0f, 0.2f);
         for (int n = 0; n < burst; ++n) { const float v = nd (rng); b.setSample (0, n, v); b.setSample (1, n, v); }
 
-        SpectralEngine e; e.prepare (sr, 2); e.setColour (1.0f); e.setReverb (0.7f);
-        runEngine (e, b, 512, aMinor);
+        AmbientReverb rv; rv.prepare (sr, 512);
+        SpectralEngine e; e.prepare (sr, 2); e.setColour (1.0f);
+        for (int pos = 0; pos < len; pos += 512)
+        {
+            const int n = juce::jmin (512, len - pos);
+            juce::AudioBuffer<float> view (b.getArrayOfWritePointers(), 2, pos, n);
+            rv.process (view, 2, 0.7f);
+            e.setScaleMask (aMinor);
+            e.process (view);
+        }
 
         bool finite = true; float peak = 0;
         for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n)
         { const float v = b.getSample (c, n); finite &= std::isfinite (v); peak = juce::jmax (peak, std::abs (v)); }
 
         auto rmsAt = [&] (double t) { return juce::Decibels::gainToDecibels (b.getRMSLevel (0, latency + (int) (t * sr), (int) (0.25 * sr)), -150.0f); };
-        const float t1 = rmsAt (1.0), t3 = rmsAt (3.0), t5 = rmsAt (5.0);
+        const float t1 = rmsAt (1.0), t3 = rmsAt (3.0), t6 = rmsAt (6.0);
 
-        // corrélation gauche/droite de la queue (entrée mono parfaite)
         double sxy = 0, sxx = 0, syy = 0;
         for (int n = latency + (int) sr; n < latency + (int) (3 * sr); ++n)
         { const double l = b.getSample (0, n), r = b.getSample (1, n); sxy += l * r; sxx += l * l; syy += r * r; }
         const double lr = sxy / std::sqrt (sxx * syy + 1e-20);
 
-        // part harmonique de la queue (1 s → 3 s)
         constexpr int order = 15, N = 1 << order;
         juce::dsp::FFT f (order);
         std::vector<float> w ((size_t) N * 2, 0.0f);
@@ -458,25 +447,46 @@ int main (int argc, char** argv)
         for (int k = 1; k < N / 2; ++k)
         {
             const double hz = k * sr / N;
-            if (hz < 200 || hz > 6000) continue;
+            if (hz < 300 || hz > 6000) continue;
             const double p = (double) w[(size_t) k] * w[(size_t) k], midi = frame::hzToMidi (hz);
             total += p;
-            if (std::abs (midi - frame::nearestScaleMidi (midi, aMinor)) < 0.25) inKey += p;
+            if (frame::maskContains (aMinor, (int) std::floor (midi + 0.5))) inKey += p;
         }
         const double harm = 100.0 * inKey / (total + 1e-20);
 
-        std::printf ("     queue : +1 s %.1f dB, +3 s %.1f dB, +5 s %.1f dB ; harmonique %.0f %% ; corrélation G/D %.2f ; crête %.2f\n",
-                     t1, t3, t5, harm, lr, peak);
-        check (finite && peak < 1.5f, "reverb : pas de valeur invalide ni d'emballement");
-        check (t1 > -50.0f && t3 < t1 && t5 < t3, "reverb : queue présente qui s'éteint");
-        check (harm > 60.0, "reverb : queue accordée sur la gamme (bruit → notes)");
-        check (lr < 0.8, "reverb : queue large (gauche et droite décorrélées)");
-        if (outDir != juce::File()) writeWav (outDir.getChildFile ("reverb_particules_la_mineur.wav"), b);
+        std::printf ("     queue : +1 s %.1f dB, +3 s %.1f dB, +6 s %.1f dB ; dans la gamme %.0f %% ; corrélation G/D %.2f ; crête %.2f\n",
+                     t1, t3, t6, harm, lr, peak);
+        check (finite, "reverb : aucune valeur invalide");
+        check (t1 > -40.0f && t3 > -60.0f && t3 < t1 && t6 < t3, "reverb : vraie queue longue qui s'éteint");
+        check (harm > 75.0, "reverb : queue harmonisée dans la gamme");
+        check (lr < 0.8, "reverb : stéréo large");
+        if (outDir != juce::File()) writeWav (outDir.getChildFile ("reverb_ambient_la_mineur.wav"), b);
+    }
+
+    // ---- 9b. REVERB à 100 % sur 40 s de bruit continu : pas d'emballement ------
+    {
+        std::printf ("9b. reverb 100 %% sur 40 s de bruit continu (stabilité du nuage réinjecté)\n");
+        AmbientReverb rv; rv.prepare (sr, 512);
+        juce::AudioBuffer<float> b (2, 512);
+        std::mt19937 rng (4); std::normal_distribution<float> nd (0.0f, 0.1f);
+        float lastRms = 0, maxRms = 0; bool finite = true;
+        for (int blk = 0; blk < (int) (40 * sr / 512); ++blk)
+        {
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < 512; ++n) b.setSample (c, n, nd (rng));
+            rv.process (b, 2, 1.0f);
+            const float r = b.getRMSLevel (0, 0, 512);
+            finite &= std::isfinite (r);
+            if (blk > (int) (20 * sr / 512)) maxRms = juce::jmax (maxRms, r);
+            lastRms = r;
+        }
+        std::printf ("     niveau sortie (entrée −20 dB RMS) : max %.1f dB, fin %.1f dB\n",
+                     juce::Decibels::gainToDecibels (maxRms), juce::Decibels::gainToDecibels (lastRms));
+        check (finite && maxRms < 1.0f, "reverb stable (pas d'emballement)");
     }
 
     // ---- 10. Robustesse : COLOR et REVERB qui bougent à chaque bloc -----------
     {
-        std::printf ("10. automation brutale de COLOR / REVERB / gamme (20 s)\n");
+        std::printf ("10. automation brutale de COLOR / gamme (20 s)\n");
         SpectralEngine e; e.prepare (sr, 2);
         juce::AudioBuffer<float> b (2, 256);
         std::mt19937 rng (2); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
@@ -484,8 +494,7 @@ int main (int argc, char** argv)
         for (int blk = 0; blk < (int) (20 * sr / 256); ++blk)
         {
             for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) b.setSample (c, n, 0.4f * u (rng));
-            e.setColour (2.0f * (float) ((blk * 7919) % 101) / 100.0f);
-            e.setReverb ((float) ((blk * 104729) % 101) / 100.0f);
+            e.setColour ((float) ((blk * 7919) % 101) / 100.0f);
             e.setScaleMask (frame::scaleMask ((blk / 50) % 12, (blk / 120) % 2 ? frame::Mode::minor : frame::Mode::major));
             e.process (b);
             for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) finite &= std::isfinite (b.getSample (c, n));

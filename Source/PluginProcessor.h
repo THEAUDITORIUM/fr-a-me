@@ -10,6 +10,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SpectralEngine.h"
+#include "AmbientReverb.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -52,7 +53,7 @@ public:
     bool acceptsMidi() const override  { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return SpectralEngine::maxTailSeconds; }   // queues de résonance / reverb
+    double getTailLengthSeconds() const override { return AmbientReverb::maxTailSeconds; }   // queue de la reverb
 
     int getNumPrograms() override    { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -86,6 +87,7 @@ private:
                          int numChannels, int numSamples) noexcept;
 
     SpectralEngine engine;
+    AmbientReverb reverb;                 // avant le moteur : la queue est harmonisée elle aussi
 
     std::atomic<float>* mixParam  = nullptr;
     std::atomic<float>* colorParam = nullptr;

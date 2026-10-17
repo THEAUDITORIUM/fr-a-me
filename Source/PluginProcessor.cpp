@@ -36,20 +36,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 2. COLOR : 0–200 %, défaut 100 % (comme Chroma). 0 → 100 % : peigne
-    //    harmonique ; au-delà de 100 % : queue de résonance harmonique.
+    // 2. COLOR : 0–100 %, défaut 100 % (comme Chroma) : peigne harmonique et
+    //    harmoniques justes.
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::color, 1 }, "color",
-        NormalisableRange<float> (0.0f, 200.0f, 0.1f), 100.0f,
+        ParameterID { ParamIDs::color, 2 }, "color",
+        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
         AudioParameterFloatAttributes()
             .withLabel ("%")
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 3. REVERB : 0–100 %, défaut 30 %. Réverbe spectrale accordée sur la
-    //    gamme + particules harmoniques (petits grains de notes de la gamme).
+    // 3. REVERB : 0–100 %, défaut 30 %. Réverbe ambient (FDN) avec nuage
+    //    granulaire réinjecté, placée avant le moteur : queue dans la tonalité.
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::reverb, 1 }, "reverb",
+        ParameterID { ParamIDs::reverb, 2 }, "reverb",
         NormalisableRange<float> (0.0f, 100.0f, 0.1f), 30.0f,
         AudioParameterFloatAttributes()
             .withLabel ("%")
@@ -87,6 +87,7 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
     engine.prepare (sampleRate, 2);
+    reverb.prepare (sampleRate, maxChunk);
     setLatencySamples (engine.getLatencySamples());   // compensation de latence par l'hôte
 
     dryBuffer.setSize (2, maxChunk, false, true, false);
@@ -154,6 +155,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (engineNeedsReset)
     {
         engine.reset();
+        reverb.reset();
         dryDelay.clear();
         colourSmoothed = colorParam->load() * 0.01f;
         reverbSmoothed = reverbParam->load() * 0.01f;
@@ -169,7 +171,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float blockSeconds = (float) ((double) buffer.getNumSamples() / (sr > 0.0 ? sr : 44100.0));
     const float k = juce::jlimit (0.0f, 1.0f, 1.0f - std::exp (-blockSeconds / 0.06f));
 
-    const float colourTarget = juce::jlimit (0.0f, 2.0f, finiteOrZero (colorParam->load()) * 0.01f);
+    const float colourTarget = juce::jlimit (0.0f, 1.0f, finiteOrZero (colorParam->load()) * 0.01f);
     colourSmoothed += (colourTarget - colourSmoothed) * k;
     if (! std::isfinite (colourSmoothed)) colourSmoothed = colourTarget;
     engine.setColour (colourSmoothed);
@@ -177,7 +179,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float reverbTarget = juce::jlimit (0.0f, 1.0f, finiteOrZero (reverbParam->load()) * 0.01f);
     reverbSmoothed += (reverbTarget - reverbSmoothed) * k;
     if (! std::isfinite (reverbSmoothed)) reverbSmoothed = reverbTarget;
-    engine.setReverb (reverbSmoothed);
+
 
     // L'hôte peut envoyer un bloc plus grand qu'annoncé : on découpe.
     for (int start = 0; start < buffer.getNumSamples(); start += maxChunk)
@@ -201,7 +203,8 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
-    engine.process (wetView);
+    reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + nuage granulaire
+    engine.process (wetView);                                // 2. recalage + harmoniques + peigne (queue comprise)
 
     const int delayLength = dryDelay.getNumSamples();
     bool invalid = false;

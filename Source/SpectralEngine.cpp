@@ -103,30 +103,10 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     // Durée du fondu lors d'un changement de gamme : ~100 ms.
     scaleFadeStep = juce::jlimit (0.05f, 1.0f, (float) hopSize / (float) (0.1 * sampleRate));
 
-    revMag.assign   ((size_t) numChannels, std::vector<float> ((size_t) numBins, 0.0f));
-    revPhase.assign ((size_t) numChannels, std::vector<float> ((size_t) numBins, 0.0f));
-    revHarmonic.assign ((size_t) numBins, 0.0f);
-    revMask = 0xFFFF;
-
     combCurveDb.assign ((size_t) numBins, 0.0f);
     combPrevCurveDb.assign ((size_t) numBins, 0.0f);
     combGain.assign ((size_t) numBins, 1.0f);
     combMask = combPrevMask = 0xFFFF;                    // force le premier calcul
-
-    // Résonateurs : montée ~90 ms, extinction T60 = resonanceT60Seconds.
-    {
-        const float framesPerSecond = (float) (sampleRate / hopSize);
-        resAttack = 1.0f - std::exp (-1.0f / (0.09f * framesPerSecond));
-        resDecay  = std::pow (10.0f, -3.0f / (resonanceT60Seconds * framesPerSecond));
-
-        // Phases de départ aléatoires (fixes) par note / harmonique / canal :
-        // les canaux ne sont pas corrélés, la queue s'ouvre en stéréo.
-        juce::Random rng (0xC0FFEE);
-        for (auto& note : resPhaseOffset)
-            for (auto& partial : note)
-                for (auto& ph : partial)
-                    ph = twoPi * rng.nextFloat();
-    }
 
     // Lignes du spectrogramme (axe logarithmique) → plages de bins.
     rowBinStart.assign (SpectralFrameInfo::numSpectrumRows, 0);
@@ -159,12 +139,7 @@ void SpectralEngine::reset() noexcept
 
     rover = fftSize - hopSize;
     combNorm = 1.0f;
-    for (auto& v : revMag) std::fill (v.begin(), v.end(), 0.0f);
-    for (auto& p : particles) p.active = false;
-    inputLevel = 0.0f;
-    resEnergy.fill (0.0f);
-    resExcite.fill (0.0f);
-    resPhase = resPhaseOffset;
+
     numPeaks = 0;
     firstFrame = true;
     previousMask = currentMask;
@@ -243,8 +218,7 @@ float SpectralEngine::targetFrequencyFor (float hz) const noexcept
         return hz;
 
     const double midi = frame::hzToMidi (hz);
-    // COLOR > 100 % : le désaccord gardé diminue (0.5 → 0 à 200 %), recalage plus serré.
-    const double keep = 0.5 * (double) juce::jlimit (0.0f, 1.0f, 2.0f - colour);
+    const double keep = 0.5;                       // moitié de l'écart gardée (mesuré sur Chroma)
     double target = frame::chromaTargetMidi (midi, currentMask, keep);
 
     if (scaleFade < 1.0f)
@@ -412,15 +386,11 @@ void SpectralEngine::processFrame() noexcept
 
     }
 
-    // ---- 6b. Peigne harmonique « COLOR » -------------------------------------
+    // ---- 6b. Harmoniques justes (octaves, quintes de la gamme) ----------------
+    addHarmonics (nch);
+
+    // ---- 6c. Peigne harmonique « COLOR » -------------------------------------
     applyColourComb (nch);
-
-    // ---- 6c. Résonance harmonique (COLOR > 100 %) ----------------------------
-    updateResonators();
-    addResonators (nch);
-
-    // ---- 6d. Reverb harmonique + particules ----------------------------------
-    applyReverbAndParticles (nch);
 
     for (int c = 0; c < nch; ++c)
     {
@@ -460,19 +430,18 @@ void SpectralEngine::processFrame() noexcept
 //==============================================================================
 void SpectralEngine::setColour (float c) noexcept
 {
-    colour = juce::jlimit (0.0f, 2.0f, c);
-    resonanceAmount = juce::jmax (0.0f, colour - 1.0f);    // au-delà de 100 % : queue de résonance
+    colour = juce::jlimit (0.0f, 1.0f, c);
 }
 
 void SpectralEngine::computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept
 {
     // Courbe en dB, par bin, pour une profondeur de 100 % :
-    //   +4 dB sur les notes de la gamme (pics étroits, ~15 cents),
-    //   −6 dB entre elles, actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
+    //   +5.5 dB sur les notes de la gamme (pics étroits, ~15 cents),
+    //   −8 dB entre elles (un peu plus marqué que Chroma, à la demande), actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
     //   puis niveau global compensé.
     // Calé en comparant fr(a)me et Chroma sur le même extrait (démo vidéo) :
     // écart moyen par note ≈ 1.5 dB entre 600 Hz et 4 kHz, niveau identique.
-    constexpr float peakDb = 4.0f, floorDb = -6.0f, sigmaCents = 15.0f;
+    constexpr float peakDb = 5.5f, floorDb = -8.0f, sigmaCents = 15.0f;
 
     for (int k = 0; k < numBins; ++k)
     {
@@ -502,7 +471,7 @@ void SpectralEngine::computeCombCurve (uint16_t mask, std::vector<float>& curveD
 
 void SpectralEngine::applyColourComb (int nch) noexcept
 {
-    const float depth = colour;                               // 0…2 : au-delà de 100 %, peigne encore plus marqué
+    const float depth = colour;                               // 0…1
     if (depth <= 0.0f || currentMask == 0)
         return;
 
@@ -549,222 +518,8 @@ void SpectralEngine::applyColourComb (int nch) noexcept
 }
 
 //==============================================================================
-//  Reverb harmonique + particules chromatiques
+//  Harmoniques justes
 //==============================================================================
-float SpectralEngine::nextRandom() noexcept
-{
-    // xorshift32 : rapide, sans état partagé, sans allocation.
-    rngState ^= rngState << 13;
-    rngState ^= rngState >> 17;
-    rngState ^= rngState << 5;
-    return (float) (rngState >> 8) * (1.0f / 16777216.0f);
-}
-
-void SpectralEngine::applyReverbAndParticles (int nch) noexcept
-{
-    const float fullScale = (float) fftSize * 0.25f;
-
-    // Énergie de l'entrée (pour déclencher les particules au rythme du son).
-    {
-        float e = 0.0f;
-        for (int k = 1; k < numBins; ++k) e += magnitude[(size_t) k];
-        const float level = e / fullScale;
-        inputLevel = level > inputLevel ? level : inputLevel * 0.9f;
-        if (! std::isfinite (inputLevel)) inputLevel = 0.0f;
-    }
-
-    if (reverbAmount <= 0.0005f)
-    {
-        // Reverb coupée : la queue continue de s'éteindre en silence (pas de
-        // saut si on la remonte), les particules en cours s'arrêtent.
-        for (int c = 0; c < nch; ++c)
-            for (auto& m : revMag[(size_t) c]) m *= 0.5f;
-        for (auto& p : particles) p.active = false;
-        return;
-    }
-
-    // Poids « harmonique » par bin : 1 sur les notes de la gamme, faible entre.
-    if (revMask != currentMask)
-    {
-        for (int k = 0; k < numBins; ++k)
-        {
-            const float hz = (float) k * binHz;
-            if (hz < 60.0f || currentMask == 0) { revHarmonic[(size_t) k] = 0.0f; continue; }
-            const double midi = frame::hzToMidi (hz);
-            const float dist = (float) std::abs (midi - frame::nearestScaleMidi (midi, currentMask)) * 100.0f;
-            const float binCents = 600.0f * std::log2 ((hz + 0.5f * binHz) / juce::jmax (1.0f, hz - 0.5f * binHz));
-            const float sigma = std::sqrt (20.0f * 20.0f + binCents * binCents);
-            revHarmonic[(size_t) k] = 0.04f + 0.96f * std::exp (-0.5f * (dist / sigma) * (dist / sigma));
-        }
-        revMask = currentMask;
-    }
-
-    // Queue : T60 de 2 s (reverb basse) à 10 s (reverb à fond), aigus amortis.
-    const float framesPerSecond = (float) (sampleRate / hopSize);
-    const float t60 = 2.0f + 8.0f * reverbAmount;
-    const float wet = 0.6f * std::pow (reverbAmount, 0.8f);
-    const float advance = twoPi * (float) hopSize / (float) fftSize;
-
-    for (int c = 0; c < nch; ++c)
-    {
-        auto& Z = spectrumOut[(size_t) c];
-        auto& R = revMag[(size_t) c];
-        auto& P = revPhase[(size_t) c];
-
-        for (int k = 1; k < numBins - 1; ++k)
-        {
-            const float hz = (float) k * binHz;
-            const float damp = 1.0f + 2.5f * smoothStep ((hz - 4000.0f) / 8000.0f);   // aigus : queue jusqu'à 3.5× plus courte
-            const float decay = std::pow (10.0f, -3.0f / (t60 / damp * framesPerSecond));
-
-            // L'énergie entre dans la queue en douceur et n'en ressort que
-            // lentement ; seules les fréquences des notes la nourrissent vraiment.
-            const float in = std::abs (Z[(size_t) k]) * revHarmonic[(size_t) k];
-            float& r = R[(size_t) k];
-            r = in > r ? r + (in - r) * 0.25f       // montée ~85 ms
-                       : r * decay;                  // extinction selon T60
-            if (! std::isfinite (r) || r < 1.0e-9f) r = 0.0f;
-
-            // Phase : avance cohérente (sonne comme une note tenue) + petite
-            // dérive aléatoire, différente à gauche et à droite (largeur, diffusion).
-            float& ph = P[(size_t) k];
-            ph = wrapPhase (ph + (float) k * advance + (nextRandom() - 0.5f) * 1.1f);
-
-            if (r > 0.0f)
-                Z[(size_t) k] += std::polar (r * wet, ph);
-        }
-    }
-
-    // ---- Particules chromatiques harmoniques ---------------------------------
-    // Déclenchement : probabilité par trame ∝ REVERB × énergie (entrée + queue).
-    float tail = 0.0f;
-    for (int k = 1; k < numBins; k += 4) tail += revMag[0][(size_t) k];
-    tail /= fullScale;
-    const float drive = juce::jlimit (0.0f, 1.0f, 8.0f * (inputLevel + 0.5f * tail));
-    const float spawnPerFrame = reverbAmount * drive * 0.55f;            // ≈ 0–25 grains / s
-
-    int spawns = 0;
-    float budget = spawnPerFrame;
-    while (budget > 0.0f && spawns < 3)
-    {
-        if (nextRandom() < budget)
-        {
-            for (auto& p : particles)
-            {
-                if (p.active) continue;
-
-                // Note de la gamme au hasard dans l'aigu (do5 → do8), plus
-                // souvent tonique / quinte, parfois doublée à l'octave.
-                int note = 72 + (int) (nextRandom() * 36.0f);
-                for (int guard = 0; guard < 12 && ! frame::maskContains (currentMask, note); ++guard) ++note;
-                if (! frame::maskContains (currentMask, note)) break;
-
-                const float hz = (float) frame::midiToHz (note) * (1.0f + (nextRandom() - 0.5f) * 0.002f);
-                if (hz > (float) sampleRate * 0.42f) break;
-
-                const float pan = nextRandom();
-                p.active = true;
-                p.hz = hz;
-                p.amp = (0.004f + 0.05f * drive) * (0.35f + 0.65f * nextRandom()) * reverbAmount;
-                p.age = 0;
-                p.length = 3 + (int) (nextRandom() * 9.0f);              // ~60–250 ms
-                p.gainL = std::cos (pan * 0.5f * pi);
-                p.gainR = std::sin (pan * 0.5f * pi);
-                p.phase[0] = twoPi * nextRandom();
-                p.phase[1] = p.phase[0] + 0.4f * (nextRandom() - 0.5f);
-                break;
-            }
-            ++spawns;
-        }
-        budget -= 1.0f;
-    }
-
-    const float hopSeconds = (float) hopSize / (float) sampleRate;
-    for (auto& p : particles)
-    {
-        if (! p.active) continue;
-
-        const float t = ((float) p.age + 0.5f) / (float) p.length;
-        const float env = std::sin (pi * t);                              // fondu sinusoïdal : aucune attaque sèche
-        const float a = p.amp * env * env;
-
-        for (int c = 0; c < nch; ++c)
-        {
-            const float g = nch > 1 ? (c == 0 ? p.gainL : p.gainR) : 0.7071f;
-            addSinusoid (spectrumOut[(size_t) c], p.hz / binHz, a * g, p.phase[c]);
-        }
-        for (int c = 0; c < 2; ++c)
-            p.phase[c] = wrapPhase (p.phase[c] + twoPi * p.hz * hopSeconds);
-
-        if (++p.age >= p.length)
-            p.active = false;
-    }
-}
-
-//==============================================================================
-//  Résonance harmonique
-//==============================================================================
-int SpectralEngine::scaleStepAbove (int midiNote, int steps) const noexcept
-{
-    // Monte de `steps` degrés dans la gamme courante (2 = tierce, 4 = quinte).
-    int n = midiNote;
-    for (int found = 0, guard = 0; found < steps && guard < 24; ++guard)
-        if (frame::maskContains (currentMask, ++n))
-            ++found;
-    return n;
-}
-
-void SpectralEngine::updateResonators() noexcept
-{
-    const float fullScale = (float) fftSize * 0.25f;
-    resExcite.fill (0.0f);
-
-    auto excite = [this] (int note, float amp)
-    {
-        const int i = note - resLowNote;
-        if (i >= 0 && i < numResonators)
-            resExcite[(size_t) i] = juce::jmax (resExcite[(size_t) i], amp);
-    };
-
-    if (resonanceAmount > 0.0f && currentMask != 0)
-    {
-        for (int p = 0; p < numPeaks; ++p)
-        {
-            if (peakTonalAge[(size_t) p] < 1)
-                continue;                                 // bruit, attaques : pas d'excitation
-
-            const float amp = magnitude[(size_t) peakBin[(size_t) p]] / fullScale;
-            if (amp < 2.0e-4f)                            // < −74 dBFS : ignoré
-                continue;
-
-            const int note = (int) std::lround (frame::hzToMidi (peakTargetHz[(size_t) p]));
-            if (! frame::maskContains (currentMask, note))
-                continue;
-
-            excite (note,                         amp);          // la note elle-même
-            excite (note + 12,                    amp * 0.45f);  // octave
-            excite (scaleStepAbove (note, 4),     amp * 0.38f);  // quinte de la gamme
-            excite (scaleStepAbove (note, 2),     amp * 0.30f);  // tierce de la gamme
-        }
-    }
-
-    for (int i = 0; i < numResonators; ++i)
-    {
-        float& e = resEnergy[(size_t) i];
-        const float target = resExcite[(size_t) i];
-
-        if (! frame::maskContains (currentMask, resLowNote + i))
-            e *= 0.6f;                                    // hors gamme (après un changement) : extinction rapide
-        else if (target > e)
-            e += (target - e) * resAttack;                // montée douce (« bloom »)
-        else
-            e *= resDecay;                                // longue queue
-
-        if (e < 1.0e-6f)
-            e = 0.0f;
-    }
-}
-
 void SpectralEngine::addSinusoid (std::vector<Complex>& Z, float k0, float amplitude, float phase0) const noexcept
 {
     // Spectre exact d'une sinusoïde fenêtrée par Hann (fenêtre de N points) :
@@ -783,41 +538,65 @@ void SpectralEngine::addSinusoid (std::vector<Complex>& Z, float k0, float ampli
     }
 }
 
-void SpectralEngine::addResonators (int nch) noexcept
+void SpectralEngine::addHarmonics (int nch) noexcept
 {
-    static constexpr float partialGain[resPartials] = { 1.0f, 0.5f, 0.28f, 0.16f, 0.09f };
-    static constexpr float detune[resChannels] = { 0.9992f, 1.0008f };   // ±1.4 cent : largeur stéréo
+    // Pour chaque partiel tonal (donc recalé dans la gamme), on ajoute ses
+    // harmoniques justes : octave (×2), double octave (×4) et, si la quinte
+    // est dans la gamme, la douzième (×3). Leur phase est celle du partiel
+    // multipliée par le rang : elles naissent et meurent exactement avec lui
+    // (aucune queue, transitoires intacts), comme une saturation… mais
+    // uniquement sur des notes de la gamme. Dosées par COLOR.
+    if (colour <= 0.0f || currentMask == 0 || numPeaks == 0)
+        return;
 
-    const float maxHz = juce::jmin (12000.0f, (float) sampleRate * 0.45f);
-    const float hopSeconds = (float) hopSize / (float) sampleRate;
+    const float fullScale = (float) fftSize * 0.25f;
+    const float maxHz = juce::jmin (16000.0f, (float) sampleRate * 0.45f);
+    auto sinc = [] (float x) { return std::abs (x) < 1.0e-6f ? 1.0f : std::sin (pi * x) / (pi * x); };
 
-    // Normalisation : la somme des amplitudes reste sous ~−11 dBFS, quel que
-    // soit le nombre de notes qui sonnent.
-    float total = 0.0f;
-    for (float e : resEnergy) total += e;
-    const float level = 0.42f * resonanceAmount;
-    const float norm = (total * level > 0.28f) ? 0.28f / (total * level) : 1.0f;
+    // Les partiels les plus forts d'abord (au plus 40).
+    int count = 0;
+    for (int p = 0; p < numPeaks; ++p)
+        if (peakTonalAge[(size_t) p] >= 1 && magnitude[(size_t) peakBin[(size_t) p]] > fullScale * 1.0e-3f)
+            peakOrder[(size_t) count++] = p;
+    const int used = juce::jmin (count, 40);
+    std::partial_sort (peakOrder.begin(), peakOrder.begin() + used, peakOrder.begin() + count,
+                       [this] (int a, int b) { return magnitude[(size_t) peakBin[(size_t) a]] > magnitude[(size_t) peakBin[(size_t) b]]; });
 
-    for (int i = 0; i < numResonators; ++i)
+    struct Rank { int mult; float gain; };
+    const Rank ranks[3] = { { 2, 0.42f }, { 3, 0.26f }, { 4, 0.17f } };
+
+    for (int i = 0; i < used; ++i)
     {
-        const float e = resEnergy[(size_t) i];
-        const float f0 = (float) frame::midiToHz (resLowNote + i);
+        const int p = peakOrder[(size_t) i];
+        const float f0 = peakTargetHz[(size_t) p];
+        const float k0 = f0 / binHz;
+        const int kc = (int) std::lround (k0);
+        if (kc < 2 || kc >= numBins - 2)
+            continue;
 
-        for (int h = 0; h < resPartials; ++h)
+        const float d = (float) kc - k0;
+        const float w = 0.5f * sinc (d) + 0.25f * (sinc (d - 1.0f) + sinc (d + 1.0f));
+        if (w < 0.2f)
+            continue;
+
+        const int note = (int) std::lround (frame::hzToMidi (f0));
+
+        for (const auto& r : ranks)
         {
-            const float f = f0 * (float) (h + 1);
+            const float fh = f0 * (float) r.mult;
+            if (fh > maxHz)
+                break;
+            if (r.mult == 3 && ! frame::maskContains (currentMask, note + 19))
+                continue;                                     // douzième hors gamme : on la saute
 
-            for (int c = 0; c < resChannels; ++c)
+            for (int c = 0; c < nch; ++c)
             {
-                const float fc = f * (nch > 1 ? detune[c] : 1.0f);
-                float& ph = resPhase[(size_t) i][(size_t) h][(size_t) c];
-
-                if (e > 0.0f && f < maxHz && c < nch)
-                    addSinusoid (spectrumOut[(size_t) c], fc / binHz, e * level * norm * partialGain[h], ph);
-
-                // La phase avance à chaque trame, que la note sonne ou non :
-                // elle reprend toujours de façon continue.
-                ph = wrapPhase (ph + twoPi * fc * hopSeconds);
+                // Amplitude et phase du partiel dans CE canal (lues sur le bin le plus proche).
+                const Complex zp = spectrumOut[(size_t) c][(size_t) kc];
+                const float amp = 2.0f * std::abs (zp) / ((float) fftSize * w);
+                const float phi = std::arg (zp) + pi * d;
+                addSinusoid (spectrumOut[(size_t) c], fh / binHz, amp * r.gain * colour,
+                             wrapPhase (phi * (float) r.mult));
             }
         }
     }

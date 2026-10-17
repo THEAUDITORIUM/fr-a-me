@@ -33,18 +33,9 @@
       5c. Peigne harmonique COLOR : renfort étroit (+4 dB) sur les fréquences
          des notes de la gamme, creux (−6 dB) entre elles, 250 Hz – 12 kHz,
          niveau global compensé. Pas de filtre qui sonne : aucune queue.
-      6. Résonance harmonique (COLOR > 100 %) : chaque partiel tonal recalé excite
-         une banque de résonateurs accordés sur les notes de la gamme. Chaque
-         résonateur excité sonne sa note avec 5 harmoniques, et appelle aussi
-         l'octave, la tierce et la quinte DE LA GAMME au-dessus : l'harmonie est
-         renforcée en accords dans la tonalité. Les résonateurs montent en
-         douceur (~90 ms) et s'éteignent lentement (T60 ≈ 4 s), avec un léger
-         désaccord gauche/droite : une queue ambiante, comme une réverbe qui
-         ne jouerait que des notes justes. Ils sont synthétisés directement
-         dans le domaine spectral (noyau de Hann exact, phase continue). Les
-         régions tonales recalées sont aussi légèrement amplifiées (+2 dB).
-         Bruit et transitoires n'excitent pas les résonateurs.
-      6b. REVERB : queue spectrale accordée + particules harmoniques.
+      6. Harmoniques justes : chaque partiel recalé reçoit son octave, sa double
+         octave et sa douzième si la quinte est dans la gamme, en phase avec
+         lui (aucune queue). Dosé par COLOR.
       7. IFFT, fenêtre de synthèse de Hann, overlap-add.
 
     Contraintes temps réel : toutes les mémoires sont allouées dans prepare().
@@ -108,29 +99,10 @@ public:
         Réservé aux tests / à l'usage interne : le plugin utilise 1. */
     void setCorrectionAmount (float amount) noexcept { correctionAmount = juce::jlimit (0.0f, 1.0f, amount); }
 
-    /** COLOR, comme sur Chroma (0…2, soit 0–200 %) :
-          0 → 1   : profondeur du peigne harmonique (notes de la gamme renforcées,
-                    espace entre elles creusé, niveau global compensé) ;
-          1 → 2   : en plus, queue de résonance harmonique (accords de la gamme,
-                    T60 ≈ 4 s). */
+    /** COLOR, comme sur Chroma (0…1, soit 0–100 %) : profondeur du peigne
+        harmonique (notes de la gamme renforcées, espace entre elles creusé,
+        niveau global compensé) et des harmoniques justes ajoutées. */
     void setColour (float colourAmount) noexcept;
-
-    /** REVERB (0…1) : réverbe spectrale accordée sur la gamme (la queue ne
-        garde que les fréquences des notes, phases diffuses et décorrélées
-        gauche/droite, aigus amortis, T60 de 2 à 10 s) + particules
-        chromatiques harmoniques : petits grains sinusoïdaux (60–250 ms) sur
-        des notes de la gamme dans l'aigu, déclenchés par l'énergie du son et
-        de la queue, placés aléatoirement dans l'espace stéréo. */
-    void setReverb (float amount) noexcept { reverbAmount = juce::jlimit (0.0f, 1.0f, amount); }
-
-    /** Plus longue queue possible (reverb à 100 %), pour l'hôte. */
-    static constexpr double maxTailSeconds = 11.0;
-
-    /** Réglage direct de la queue de résonance (tests). */
-    void setResonanceAmount (float amount) noexcept { resonanceAmount = juce::jlimit (0.0f, 2.0f, amount); }
-
-    /** Durée de la queue de résonance (pour getTailLengthSeconds). */
-    static constexpr float resonanceT60Seconds = 4.0f;
 
     /** Traite le bloc en place : en sortie, le signal 100 % traité ("wet"),
         retardé de getLatencySamples(). Nombre de canaux ≤ maxNumChannels. */
@@ -147,12 +119,8 @@ private:
     void publishVisualFrame (int numChannelsUsed) noexcept;
     void applyColourComb (int numChannelsUsed) noexcept;
     void computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept;
-    void applyReverbAndParticles (int numChannelsUsed) noexcept;
-    float nextRandom() noexcept;                  // 0…1, générateur rapide sans allocation
-    void updateResonators() noexcept;
-    void addResonators (int numChannelsUsed) noexcept;
+    void addHarmonics (int numChannelsUsed) noexcept;
     void addSinusoid (std::vector<Complex>& Z, float binPos, float amplitude, float phase0) const noexcept;
-    int scaleStepAbove (int midiNote, int steps) const noexcept;
 
     // --- configuration -------------------------------------------------------
     double sampleRate = 44100.0;
@@ -205,38 +173,6 @@ private:
     std::vector<float> combCurveDb, combPrevCurveDb, combGain;
     uint16_t combMask = 0xFFFF, combPrevMask = 0xFFFF;
     float combNorm = 1.0f;
-
-    // --- résonance harmonique -------------------------------------------------
-    static constexpr int resLowNote  = 28;        // E1 ≈ 41 Hz
-    static constexpr int resHighNote = 100;       // E7 ≈ 2.6 kHz (fondamentales)
-    static constexpr int numResonators = resHighNote - resLowNote + 1;
-    static constexpr int resPartials = 5;
-    static constexpr int resChannels = 2;
-    float resonanceAmount = 0.0f;                 // piloté par COLOR (> 100 %)
-    float resAttack = 0.25f, resDecay = 0.99f;
-    std::array<float, numResonators> resEnergy {}, resExcite {};
-    std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhase {};
-    std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhaseOffset {};
-
-    // --- reverb harmonique + particules --------------------------------------
-    float reverbAmount = 0.0f;
-    std::vector<std::vector<float>> revMag;       // énergie de la queue, par canal et par bin
-    std::vector<std::vector<float>> revPhase;     // phase courante, par canal et par bin
-    std::vector<float> revHarmonic;               // poids « note de la gamme » par bin (0…1)
-    uint16_t revMask = 0xFFFF;
-    uint32_t rngState = 0x2545F491u;
-    float inputLevel = 0.0f;                      // suiveur d'énergie de l'entrée
-
-    struct Particle
-    {
-        bool  active = false;
-        float hz = 0.0f, amp = 0.0f;
-        int   age = 0, length = 1;
-        float gainL = 0.7f, gainR = 0.7f;
-        float phase[2] {};
-    };
-    static constexpr int maxParticles = 40;
-    std::array<Particle, maxParticles> particles {};
 
     // --- visualisation --------------------------------------------------------
     LockFreeQueue<SpectralFrameInfo, 32> visualQueue;

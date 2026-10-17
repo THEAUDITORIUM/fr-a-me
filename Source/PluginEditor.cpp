@@ -193,9 +193,9 @@ void FrameCanvas::paint (juce::Graphics& g)
                   { reverbC.x - 55.0f, (float) reverbArea.getBottom() + 2.0f, 110.0f, 16.0f },
                   12.0f, J::centred, Palette::ink, true);
 
-    // Valeur du COLOR ; au-delà de 100 % la queue de résonance s'active.
+    // Valeur du COLOR.
     const int colorValue = juce::roundToInt (colorKnob.getValue());
-    drawMonoText (g, juce::String (colorValue) + " %" + (colorValue > 100 ? " +tail" : ""),
+    drawMonoText (g, juce::String (colorValue) + " %",
                   { colorC.x - 58.0f, (float) colorArea.getBottom() + 2.0f, 116.0f, 16.0f },
                   12.0f, J::centred, Palette::ink, true);
 
