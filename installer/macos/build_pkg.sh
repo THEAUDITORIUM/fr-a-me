@@ -17,6 +17,19 @@
 # ==============================================================================
 set -euo pipefail
 
+# En CI, toute erreur devient une annotation lisible dans le résumé du run.
+LOG="$(mktemp)"
+report_error () {
+    local code=$? line=$1
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        local tailtxt
+        tailtxt="$(tail -15 "$LOG" 2>/dev/null | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+        echo "::error title=build_pkg.sh ligne $line (code $code)::$BASH_COMMAND%0A$tailtxt"
+    fi
+}
+trap 'report_error $LINENO' ERR
+exec > >(tee -a "$LOG") 2>&1
+
 ART="${1:?dossier des artefacts Release}"
 VERSION="${2:?version}"
 OUT="${3:?fichier .pkg de sortie}"
