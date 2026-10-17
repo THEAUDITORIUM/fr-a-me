@@ -95,13 +95,6 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     peakOrder.assign    (maxPeaksInternal, 0);
     prevOwner.assign ((size_t) numBins, -1);
     prevTheta.assign (maxPeaksInternal, 0.0f);
-    for (int v = 0; v < numVoices; ++v)
-    {
-        prevVoiceTheta[(size_t) v].assign (maxPeaksInternal, 0.0f);
-        voiceThetaArr[(size_t) v].assign (maxPeaksInternal, 0.0f);
-        voiceGainArr[(size_t) v].assign (maxPeaksInternal, 0.0f);
-        voiceShiftArr[(size_t) v].assign (maxPeaksInternal, 0);
-    }
     prevPeakTrueHz.assign (maxPeaksInternal, 0.0f);
     prevTonalAge.assign (maxPeaksInternal, 0);
     peakTonalAge.assign (maxPeaksInternal, 0);
@@ -140,7 +133,6 @@ void SpectralEngine::reset() noexcept
     std::fill (prevPhase.begin(), prevPhase.end(), 0.0f);
     std::fill (prevOwner.begin(), prevOwner.end(), -1);
     std::fill (prevTheta.begin(), prevTheta.end(), 0.0f);
-    for (auto& v : prevVoiceTheta) std::fill (v.begin(), v.end(), 0.0f);
     std::fill (prevTonalAge.begin(), prevTonalAge.end(), 0);
     std::fill (prevMagnitude.begin(), prevMagnitude.end(), 0.0f);
     prevNumPeaks = 0;
@@ -352,36 +344,6 @@ void SpectralEngine::processFrame() noexcept
         float theta = (age >= 1) ? prevTheta[(size_t) ancestor] : 0.0f;
         theta += twoPi * (float) H * (target - trueHz) / (float) sampleRate;
         peakTheta[(size_t) p] = wrapPhase (theta);
-
-        // Voix d'harmoniseur : tierce et quinte DE LA GAMME au-dessus de la note
-        // recalée. Même mécanisme que le recalage (région déplacée + phaseur
-        // accumulé sur l'ancêtre) : timbre, souffle et enveloppe du partiel
-        // sont conservés, la voix est en phase continue d'une trame à l'autre.
-        for (int v = 0; v < numVoices; ++v)
-        {
-            float gain = 0.0f, vTheta = 0.0f;
-            int vShift = 0;
-
-            if (age >= 1 && colour > 0.0f && currentMask != 0 && target > 60.0f)
-            {
-                const double midi = frame::hzToMidi (target);
-                const int note = (int) std::lround (midi);
-                const int voiceNote = scaleStepAbove (note, voiceSteps[v]);
-                const float fv = target * (float) std::exp2 ((double) (voiceNote - note) / 12.0);
-
-                if (fv < juce::jmin (12000.0f, (float) sampleRate * 0.42f))
-                {
-                    vShift = (int) std::lround ((fv - trueHz) / binHz);
-                    const float prevV = (age >= 2) ? prevVoiceTheta[(size_t) v][(size_t) ancestor] : 0.0f;
-                    vTheta = wrapPhase (prevV + twoPi * (float) H * (fv - trueHz) / (float) sampleRate);
-                    // montée douce sur ~4 trames (≈ 85 ms) : les voix « fleurissent »
-                    gain = voiceGain[v] * colour * juce::jmin (1.0f, (float) age / 4.0f);
-                }
-            }
-            voiceShiftArr[(size_t) v][(size_t) p] = vShift;
-            voiceThetaArr[(size_t) v][(size_t) p] = vTheta;
-            voiceGainArr[(size_t) v][(size_t) p]  = gain;
-        }
     }
 
     // Mémorise la propriété des bins et l'état des pics pour la trame suivante.
@@ -391,8 +353,6 @@ void SpectralEngine::processFrame() noexcept
         for (int k = regionStart[(size_t) p]; k <= regionEnd[(size_t) p]; ++k)
             prevOwner[(size_t) k] = p;
         prevTheta[(size_t) p]      = peakTheta[(size_t) p];
-        for (int v = 0; v < numVoices; ++v)
-            prevVoiceTheta[(size_t) v][(size_t) p] = voiceThetaArr[(size_t) v][(size_t) p];
         prevPeakTrueHz[(size_t) p] = peakTrueHz[(size_t) p];
         prevTonalAge[(size_t) p]   = peakTonalAge[(size_t) p];
     }
@@ -422,20 +382,8 @@ void SpectralEngine::processFrame() noexcept
 
             for (int k = s; k <= e; ++k)
                 Z[(size_t) (k + shift)] += X[(size_t) k] * rot;
-
-            // Voix d'harmoniseur (tierce, quinte de la gamme).
-            for (int v = 0; v < numVoices; ++v)
-            {
-                const float g = voiceGainArr[(size_t) v][(size_t) p];
-                if (g <= 0.0f) continue;
-                const Complex vrot = std::polar (g, voiceThetaArr[(size_t) v][(size_t) p]);
-                const int vs = voiceShiftArr[(size_t) v][(size_t) p];
-                const int s2 = juce::jmax (regionStart[(size_t) p], -vs);
-                const int e2 = juce::jmin (regionEnd[(size_t) p], numBins - 1 - vs);
-                for (int k = s2; k <= e2; ++k)
-                    Z[(size_t) (k + vs)] += X[(size_t) k] * vrot;
-            }
         }
+
     }
 
     // ---- 6b. Harmoniques justes (octaves, quintes de la gamme) ----------------
@@ -488,12 +436,12 @@ void SpectralEngine::setColour (float c) noexcept
 void SpectralEngine::computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept
 {
     // Courbe en dB, par bin, pour une profondeur de 100 % :
-    //   +7 dB sur les notes de la gamme (pics étroits, ~15 cents),
-    //   −11 dB entre elles (nettement plus marqué que Chroma, à la demande), actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
+    //   +5.5 dB sur les notes de la gamme (pics étroits, ~15 cents),
+    //   −8 dB entre elles (un peu plus marqué que Chroma, à la demande), actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
     //   puis niveau global compensé.
     // Calé en comparant fr(a)me et Chroma sur le même extrait (démo vidéo) :
     // écart moyen par note ≈ 1.5 dB entre 600 Hz et 4 kHz, niveau identique.
-    constexpr float peakDb = 7.0f, floorDb = -11.0f, sigmaCents = 15.0f;
+    constexpr float peakDb = 5.5f, floorDb = -8.0f, sigmaCents = 15.0f;
 
     for (int k = 0; k < numBins; ++k)
     {
@@ -572,16 +520,6 @@ void SpectralEngine::applyColourComb (int nch) noexcept
 //==============================================================================
 //  Harmoniques justes
 //==============================================================================
-int SpectralEngine::scaleStepAbove (int midiNote, int steps) const noexcept
-{
-    // Monte de `steps` degrés dans la gamme courante (2 = tierce, 4 = quinte).
-    int n = midiNote;
-    for (int found = 0, guard = 0; found < steps && guard < 24; ++guard)
-        if (frame::maskContains (currentMask, ++n))
-            ++found;
-    return n;
-}
-
 void SpectralEngine::addSinusoid (std::vector<Complex>& Z, float k0, float amplitude, float phase0) const noexcept
 {
     // Spectre exact d'une sinusoïde fenêtrée par Hann (fenêtre de N points) :
@@ -625,7 +563,7 @@ void SpectralEngine::addHarmonics (int nch) noexcept
                        [this] (int a, int b) { return magnitude[(size_t) peakBin[(size_t) a]] > magnitude[(size_t) peakBin[(size_t) b]]; });
 
     struct Rank { int mult; float gain; };
-    const Rank ranks[3] = { { 2, 0.5f }, { 3, 0.32f }, { 4, 0.22f } };
+    const Rank ranks[3] = { { 2, 0.42f }, { 3, 0.26f }, { 4, 0.17f } };
 
     for (int i = 0; i < used; ++i)
     {

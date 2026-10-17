@@ -76,6 +76,7 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
     engine.prepare (sampleRate, 2);
+    engine.setColour (1.0f);                           // harmonie de la 1.4 (ancien COLOR à 100 %), fixe
     reverb.prepare (sampleRate, maxChunk);
     setLatencySamples (engine.getLatencySamples());   // compensation de latence par l'hôte
 

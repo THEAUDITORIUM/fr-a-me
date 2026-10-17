@@ -378,7 +378,7 @@ int main (int argc, char** argv)
 
     // ---- 7. Harmoniques justes ----------------------------------------------
     {
-        std::printf ("7. harmonie : la3 (220 Hz) tenu (la mineur)\n");
+        std::printf ("7. harmoniques justes : la3 (220 Hz) tenu, COLOR 100 %% (la mineur)\n");
         const int len = (int) sr * 3;
         juce::AudioBuffer<float> b (2, len);
         b.clear();
@@ -398,13 +398,10 @@ int main (int argc, char** argv)
             float m = 0; for (int j = k - 4; j <= k + 4; ++j) m = juce::jmax (m, w[(size_t) j]);
             return juce::Decibels::gainToDecibels (m / (N * 0.25f), -150.0f);
         };
-        const float f1 = bandLevel (220), f2 = bandLevel (440), f3 = bandLevel (660), f4 = bandLevel (880),
-                    v3 = bandLevel (261.63), v5 = bandLevel (329.63), off = bandLevel (233.08), off2 = bandLevel (277.18);
-        std::printf ("     la3 %.1f dB | voix : do4 (tierce) %.1f, mi4 (quinte) %.1f | harmoniques : x2 %.1f, x3 %.1f, x4 %.1f | hors gamme : la#3 %.1f, do#4 %.1f\n",
-                     f1, v3, v5, f2, f3, f4, off, off2);
-        check (v3 > f1 - 14.0f && v5 > f1 - 13.0f, "voix d'harmoniseur : tierce et quinte de la gamme");
+        const float f1 = bandLevel (220), f2 = bandLevel (440), f3 = bandLevel (660), f4 = bandLevel (880), off = bandLevel (233.08);
+        std::printf ("     la3 %.1f dB | la4 (x2) %.1f | mi5 (x3) %.1f | la5 (x4) %.1f | la#3 (hors gamme) %.1f\n", f1, f2, f3, f4, off);
         check (f2 > f1 - 14.0f && f3 > f1 - 20.0f && f4 > f1 - 24.0f, "octave, douzième et double octave ajoutées");
-        check (off < f1 - 45.0f && off2 < f1 - 45.0f, "rien hors gamme");
+        check (off < f1 - 50.0f, "rien hors gamme");
     }
 
     // ---- 9. REVERB ambient + nuage granulaire, harmonisée par le moteur ------
@@ -489,7 +486,7 @@ int main (int argc, char** argv)
 
     // ---- 10. Robustesse : COLOR et REVERB qui bougent à chaque bloc -----------
     {
-        std::printf ("10. automation brutale de l intensité / gamme (20 s)\n");
+        std::printf ("10. automation brutale de COLOR / gamme (20 s)\n");
         SpectralEngine e; e.prepare (sr, 2);
         juce::AudioBuffer<float> b (2, 256);
         std::mt19937 rng (2); std::uniform_real_distribution<float> u (-1.0f, 1.0f);

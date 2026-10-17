@@ -122,11 +122,11 @@ Résultats obtenus pendant le développement (48 kHz) :
 | la#4 en la mineur → la4 | 440.02 Hz, aucun résidu ajouté |
 | 480 Hz (si−49 cents, déjà dans la gamme) | intact, 479.98 Hz |
 | changement de gamme pendant la lecture | aucune discontinuité |
-| accord de scies désaccordées (pad) | énergie dont le demi-ton est dans la gamme : 66 % → 97 % |
+| accord de scies désaccordées (pad) | énergie dont le demi-ton est dans la gamme : 66 % → 96 % |
 | percussions : enveloppe 2 ms entrée/sortie | corrélation 0.98 (attaques conservées) |
-| la3 tenu : voix + harmoniques | tierce (do) −12 dB, quinte (mi) −10 dB, ×2 −8 dB, ×3 −9 dB, ×4 −10 dB ; hors gamme < −55 dB |
-| bruit blanc (la mineur) | notes +7 dB, entre les notes −14 dB, niveau global −0.5 dB |
-| salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 98 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
+| la3 tenu : harmoniques justes | ×2 à −9 dB, ×3 (mi) à −12 dB, ×4 à −14 dB ; la# hors gamme à −55 dB |
+| bruit blanc (la mineur) | notes +6 dB, entre les notes −11 dB, niveau global −0.6 dB |
+| salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 96 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
 | REVERB 100 % sur 40 s de bruit continu | niveau stable (pas d'emballement du nuage réinjecté) |
 | automation brutale REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
@@ -198,16 +198,14 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
 
-**Harmonie (toujours active, sans réglage — l'ancien bouton COLOR a été retiré).**
-Trois couches, appliquées à chaque note recalée :
+**Harmonie (toujours active, sans réglage — réglages de la version 1.4, l'ancien bouton
+COLOR étant figé à 100 %).** Deux couches, appliquées à chaque note recalée :
 
-- *Voix d'harmoniseur* : la note est doublée par sa **tierce** et sa **quinte de la gamme**
-  (−9 / −8 dB), obtenues en déplaçant les bins du partiel lui-même : timbre, souffle et
-  enveloppe conservés, phase continue, montée douce ~85 ms.
 - *Harmoniques justes* : octave (×2), double octave (×4) et douzième (×3) quand la quinte
-  est dans la gamme, en phase avec la note, sans queue.
-- *Peigne harmonique* : +7 dB sur les fréquences des notes de la gamme, −11 dB entre elles
-  (250 Hz – 12 kHz, niveau global compensé), y compris sur le bruit et les transitoires.
+  est dans la gamme, en phase avec la note : elles naissent et meurent avec elle, aucune
+  queue, transitoires intacts.
+- *Peigne harmonique* : +5.5 dB sur les fréquences des notes de la gamme, −8 dB entre
+  elles (250 Hz – 12 kHz, niveau global compensé), y compris sur le bruit et les transitoires.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
