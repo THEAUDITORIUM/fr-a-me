@@ -27,9 +27,10 @@ Les installeurs ne sont pas signés par un certificat développeur payant :
 - **Windows** : à l'avertissement SmartScreen, *Informations complémentaires ▸ Exécuter
   quand même*.
 
-Publier une nouvelle version : changer `VERSION` dans `CMakeLists.txt`, puis
-`git tag v1.0.1 && git push origin v1.0.1`. Chaque push sur `main` produit aussi des
-installeurs de test, téléchargeables dans *Actions ▸ dernier run ▸ Artifacts*.
+Chaque push sur `main` recompile tout et met à jour la release `vX.Y.Z`, où X.Y.Z est la
+`VERSION` du `project(...)` dans `CMakeLists.txt`. Pour une nouvelle version : changez ce
+numéro et poussez (ou poussez un tag `vX.Y.Z`). Les installeurs de chaque run sont aussi
+dans *Actions ▸ run ▸ Artifacts*.
 
 Signature optionnelle (macOS) : `installer/macos/build_pkg.sh` signe avec vos identités
 Apple si les variables `MACOS_APP_IDENTITY` et `MACOS_INSTALLER_IDENTITY` sont définies

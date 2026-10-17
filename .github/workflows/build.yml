@@ -1,10 +1,9 @@
 # ==============================================================================
 #  fr(a)me — compilation et installeurs
 #
-#  À chaque push sur main  : compile Windows + macOS, lance les tests du moteur,
-#                             et dépose les installeurs dans l'onglet « Actions »
-#                             (section « Artifacts » du run).
-#  À chaque tag vX.Y.Z      : idem + publie une release GitHub avec les fichiers :
+#  À chaque push sur main (ou tag vX.Y.Z) : compile Windows + macOS, lance les
+#  tests du moteur, puis publie / met à jour la release « vX.Y.Z » (X.Y.Z = la
+#  VERSION de CMakeLists.txt ou du tag) avec les fichiers :
 #                               frame-X.Y.Z-macos.pkg
 #                               frame-X.Y.Z-windows-setup.exe
 #                               frame-X.Y.Z-windows.zip
@@ -157,7 +156,7 @@ jobs:
 
   # ----------------------------------------------------------------------------
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [version, tests, macos, windows]
     runs-on: ubuntu-latest
     steps:
@@ -168,6 +167,10 @@ jobs:
       - run: ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          overwrite_files: true
           name: fr(a)me ${{ needs.version.outputs.version }}
           files: dist/*
           body: |
