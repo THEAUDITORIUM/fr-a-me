@@ -16,6 +16,7 @@ FrameAudioProcessor::FrameAudioProcessor()
       apvts (*this, nullptr, "FRAME_STATE", createParameterLayout())
 {
     mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
+    colorParam = apvts.getRawParameterValue (ParamIDs::color);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
 }
@@ -34,11 +35,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 2. MODE : major / minor.
+    // 2. COLOR : 0–200 %, défaut 100 % (comme Chroma). 0 → 100 % : peigne
+    //    harmonique ; au-delà de 100 % : queue de résonance harmonique.
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::color, 1 }, "color",
+        NormalisableRange<float> (0.0f, 200.0f, 0.1f), 100.0f,
+        AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
+            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
+
+    // 3. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
 
-    // 3. NOTE : tonique parmi les 12 notes.
+    // 4. NOTE : tonique parmi les 12 notes.
     StringArray notes;
     for (auto* n : frame::noteNames)
         notes.add (n);
@@ -100,6 +111,12 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
     mixSmoothed.setTargetValue (mixParam->load() * 0.01f);
+
+    // COLOR : lissage exponentiel (~60 ms) appliqué une fois par bloc.
+    const float blockSeconds = (float) buffer.getNumSamples() / (float) getSampleRate();
+    const float k = 1.0f - std::exp (-blockSeconds / 0.06f);
+    colourSmoothed += (colorParam->load() * 0.01f - colourSmoothed) * k;
+    engine.setColour (colourSmoothed);
 
     // L'hôte peut envoyer un bloc plus grand qu'annoncé : on découpe.
     for (int start = 0; start < buffer.getNumSamples(); start += maxChunk)

@@ -41,8 +41,8 @@ private:
     SpectrogramBand spectrumBand;
     PartialScore partialBand;
 
-    juce::Slider mixKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
+    juce::Slider mixKnob, colorKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, colorAttachment;
     ModeToggle modeToggle;
     NoteRow noteRow;
 
@@ -53,9 +53,10 @@ private:
     const juce::Rectangle<float> outputArea   { 80.0f, 214.0f, 840.0f,  70.0f };
     const juce::Rectangle<float> spectrumArea { 80.0f, 310.0f, 840.0f, 140.0f };
     const juce::Rectangle<float> partialArea  { 80.0f, 476.0f, 840.0f, 100.0f };
-    const juce::Rectangle<int>   knobArea     { 152, 628, 96, 96 };
-    const juce::Rectangle<int>   modeArea     { 352, 654, 210, 36 };
-    const juce::Rectangle<int>   noteArea     { 600, 648, 320, 50 };
+    const juce::Rectangle<int>   knobArea     { 132, 628, 96, 96 };
+    const juce::Rectangle<int>   colorArea    { 272, 628, 96, 96 };
+    const juce::Rectangle<int>   modeArea     { 412, 654, 180, 36 };
+    const juce::Rectangle<int>   noteArea     { 620, 648, 300, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };

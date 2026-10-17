@@ -103,6 +103,11 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     // Durée du fondu lors d'un changement de gamme : ~100 ms.
     scaleFadeStep = juce::jlimit (0.05f, 1.0f, (float) hopSize / (float) (0.1 * sampleRate));
 
+    combCurveDb.assign ((size_t) numBins, 0.0f);
+    combPrevCurveDb.assign ((size_t) numBins, 0.0f);
+    combGain.assign ((size_t) numBins, 1.0f);
+    combMask = combPrevMask = 0xFFFF;                    // force le premier calcul
+
     // Résonateurs : montée ~90 ms, extinction T60 = resonanceT60Seconds.
     {
         const float framesPerSecond = (float) (sampleRate / hopSize);
@@ -148,6 +153,7 @@ void SpectralEngine::reset() noexcept
     prevNumPeaks = 0;
 
     rover = fftSize - hopSize;
+    combNorm = 1.0f;
     resEnergy.fill (0.0f);
     resExcite.fill (0.0f);
     resPhase = resPhaseOffset;
@@ -229,11 +235,11 @@ float SpectralEngine::targetFrequencyFor (float hz) const noexcept
         return hz;
 
     const double midi = frame::hzToMidi (hz);
-    double target = frame::nearestScaleMidi (midi, currentMask);
+    double target = frame::chromaTargetMidi (midi, currentMask);
 
     if (scaleFade < 1.0f)
     {
-        const double old = frame::nearestScaleMidi (midi, previousMask);
+        const double old = frame::chromaTargetMidi (midi, previousMask);
         target = old + (target - old) * (double) smoothStep (scaleFade);
     }
 
@@ -383,13 +389,9 @@ void SpectralEngine::processFrame() noexcept
 
         std::fill (Z.begin(), Z.end(), Complex {});
 
-        // Les partiels tonaux (donc recalés dans la gamme) sont renforcés.
-        const float tonalGain = 1.0f + 0.26f * resonanceAmount;   // ≈ +2 dB
-
         for (int p = 0; p < numPeaks; ++p)
         {
-            const float gain = peakTonalAge[(size_t) p] >= 1 ? tonalGain : 1.0f;
-            const Complex rot = std::polar (gain, peakTheta[(size_t) p]);
+            const Complex rot = std::polar (1.0f, peakTheta[(size_t) p]);
             const int shift = peakShift[(size_t) p];
             const int s = juce::jmax (regionStart[(size_t) p], -shift);
             const int e = juce::jmin (regionEnd[(size_t) p], numBins - 1 - shift);
@@ -400,7 +402,10 @@ void SpectralEngine::processFrame() noexcept
 
     }
 
-    // ---- 6b. Résonance harmonique -------------------------------------------
+    // ---- 6b. Peigne harmonique « COLOR » -------------------------------------
+    applyColourComb (nch);
+
+    // ---- 6c. Résonance harmonique (COLOR > 100 %) ----------------------------
     updateResonators();
     addResonators (nch);
 
@@ -435,6 +440,98 @@ void SpectralEngine::processFrame() noexcept
     firstFrame = false;
     if (scaleFade < 1.0f)
         scaleFade = juce::jmin (1.0f, scaleFade + scaleFadeStep);
+}
+
+//==============================================================================
+//  Peigne harmonique « COLOR »
+//==============================================================================
+void SpectralEngine::setColour (float c) noexcept
+{
+    colour = juce::jlimit (0.0f, 2.0f, c);
+    resonanceAmount = juce::jmax (0.0f, colour - 1.0f);    // au-delà de 100 % : queue de résonance
+}
+
+void SpectralEngine::computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept
+{
+    // Courbe en dB, par bin, pour une profondeur de 100 % :
+    //   +4 dB sur les notes de la gamme (pics étroits, ~15 cents),
+    //   −6 dB entre elles, actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
+    //   puis niveau global compensé.
+    // Calé en comparant fr(a)me et Chroma sur le même extrait (démo vidéo) :
+    // écart moyen par note ≈ 1.5 dB entre 600 Hz et 4 kHz, niveau identique.
+    constexpr float peakDb = 4.0f, floorDb = -6.0f, sigmaCents = 15.0f;
+
+    for (int k = 0; k < numBins; ++k)
+    {
+        const float hz = (float) k * binHz;
+        const float lowRamp  = smoothStep ((hz - 250.0f) / 450.0f);
+        const float highRamp = 1.0f - smoothStep ((hz - 6000.0f) / 6000.0f);
+        const float w = lowRamp * highRamp;
+
+        if (w <= 0.0f || mask == 0)
+        {
+            curveDb[(size_t) k] = 0.0f;
+            continue;
+        }
+
+        const double midi = frame::hzToMidi (hz);
+        const float distCents = (float) std::abs (midi - frame::nearestScaleMidi (midi, mask)) * 100.0f;
+
+        // Un bin couvre une plage de fréquences : on élargit la cloche d'autant,
+        // pour qu'un bin centré près d'une note reçoive bien le renfort.
+        const float binCents = 600.0f * std::log2 ((hz + 0.5f * binHz) / juce::jmax (1.0f, hz - 0.5f * binHz));
+        const float sigma = std::sqrt (sigmaCents * sigmaCents + binCents * binCents);
+        const float bump = std::exp (-0.5f * (distCents / sigma) * (distCents / sigma));
+
+        curveDb[(size_t) k] = w * (peakDb * bump + floorDb * (1.0f - bump));
+    }
+}
+
+void SpectralEngine::applyColourComb (int nch) noexcept
+{
+    const float depth = juce::jmin (1.0f, colour);
+    if (depth <= 0.0f || currentMask == 0)
+        return;
+
+    // Courbes mises en cache : recalculées seulement si la gamme change.
+    if (combMask != currentMask)      { computeCombCurve (currentMask,  combCurveDb);     combMask = currentMask; }
+    if (combPrevMask != previousMask) { computeCombCurve (previousMask, combPrevCurveDb); combPrevMask = previousMask; }
+
+    const float fade = smoothStep (scaleFade);
+    const float dbToLin = 0.11512925f;                        // ln(10)/20
+
+    float before = 0.0f, after = 0.0f;
+    for (int k = 0; k < numBins; ++k)
+    {
+        float db = combCurveDb[(size_t) k];
+        if (fade < 1.0f)
+            db = combPrevCurveDb[(size_t) k] + (db - combPrevCurveDb[(size_t) k]) * fade;
+
+        const float g = std::exp (db * depth * dbToLin);
+        combGain[(size_t) k] = g;
+
+        if (std::abs (db) > 1.0e-6f)
+            for (int c = 0; c < nch; ++c)
+            {
+                const float e = std::norm (spectrumOut[(size_t) c][(size_t) k]);
+                before += e;
+                after  += e * g * g;
+            }
+    }
+
+    // Compensation de niveau (comme Chroma : le volume global ne bouge pas).
+    // Lissée de trame en trame pour ne pas pomper.
+    const float target = after > 1.0e-12f ? juce::jlimit (0.25f, 4.0f, std::sqrt (before / after)) : 1.0f;
+    combNorm += (target - combNorm) * 0.35f;
+
+    for (int k = 0; k < numBins; ++k)
+    {
+        if (std::abs (combCurveDb[(size_t) k]) < 1.0e-6f && std::abs (combPrevCurveDb[(size_t) k]) < 1.0e-6f)
+            continue;
+        const float g = combGain[(size_t) k] * combNorm;
+        for (int c = 0; c < nch; ++c)
+            spectrumOut[(size_t) c][(size_t) k] *= g;
+    }
 }
 
 //==============================================================================

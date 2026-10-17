@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque
 hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
 transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
 
-Trois contrôles : **mix** (0–100 %), **mode** (major / minor), **note** (tonique, 12 notes).
+Quatre contrôles : **mix** (0–100 %), **color** (0–200 %, comme sur Chroma), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -119,13 +119,14 @@ Résultats obtenus pendant le développement (48 kHz) :
 | test | résultat |
 |---|---|
 | reconstruction sans recalage (latence déclarée exacte) | erreur à −138 dB |
-| sinus 455 Hz en la mineur → 440 Hz | 440.02 Hz, aucun résidu ajouté |
-| sinus 2900 Hz en do majeur → fa7 2793.8 Hz | 2793.85 Hz |
+| la#4 en la mineur → la4 | 440.02 Hz, aucun résidu ajouté |
+| 480 Hz (si−49 cents, déjà dans la gamme) | intact, 479.98 Hz |
 | changement de gamme pendant la lecture | aucune discontinuité |
-| accord de scies désaccordées (pad) | énergie dans la gamme : 10 % → 88.6 % |
+| accord de scies désaccordées (pad), COLOR 100 % | énergie dont le demi-ton est dans la gamme : 66 % → 95 % |
 | percussions : enveloppe 2 ms entrée/sortie | corrélation 0.98 (attaques conservées) |
 | la4 tenu (la mineur) : octave / quinte / tierce ajoutées | −25 / −26 / −29 dB ; la# hors gamme à −67 dB |
-| queue de résonance après l'arrêt | −27 dB à 0.5 s, −50 dB à 2 s, −74 dB à 3.6 s |
+| queue de résonance après l'arrêt (COLOR 200 %) | −27 dB à 0.5 s, −50 dB à 2 s, −74 dB à 3.6 s |
+| bruit blanc, COLOR 100 % (la mineur) | notes +5 dB, entre les notes −9 dB, niveau global −0.6 dB |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -182,7 +183,22 @@ viennent d'apparaître passent avec leur phase d'origine : kicks, caisses claire
 consonnes restent nets. L'infra-grave (< 25 Hz) et l'extrême aigu (> 16 kHz) ne sont
 pas touchés.
 
-**Résonance harmonique (« chroma »).** Chaque partiel tonal recalé excite une banque de
+**Modèle « Chroma » (mesuré).** Le traitement a été calé en analysant les comparaisons
+avant/après de la démo vidéo de Chroma (Xynth) :
+
+- *Recalage par demi-ton* : un partiel dont le demi-ton le plus proche est dans la gamme
+  n'est pas touché (son désaccord naturel reste) ; sinon il est déplacé d'un nombre entier
+  de demi-tons vers la note de la gamme voisine, en gardant la moitié de son écart en
+  cents (mesuré : sol#+41 → la+27, do#−21 → ré−10, la#−19 → la−18).
+- *Peigne COLOR* : renfort étroit sur les fréquences des notes de la gamme et creux entre
+  elles, de ~250 Hz à 12 kHz, niveau global compensé, sans filtre qui sonne. Sur le même
+  extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
+  entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
+
+**COLOR** : de 0 à 100 % il dose le peigne (100 % = valeur calée sur Chroma) ; au-delà de
+100 % il ajoute en plus la queue de résonance harmonique décrite ci-dessous (« + tail »).
+
+**Résonance harmonique (COLOR > 100 %).** Chaque partiel tonal recalé excite une banque de
 résonateurs accordés sur les notes de la gamme (E1 → E7). Un résonateur excité sonne sa
 note avec 5 harmoniques et appelle aussi l'octave, la tierce et la quinte *de la gamme*
 au-dessus : l'harmonie se renforce en accords dans la tonalité. Montée douce (~90 ms),
@@ -222,7 +238,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **mix** (double-clic = 100 %), **color** (double-clic = 100 % ; « + tail » au-delà), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

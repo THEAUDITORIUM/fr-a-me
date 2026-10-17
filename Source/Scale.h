@@ -82,4 +82,24 @@ namespace frame
         }
         return best;
     }
+
+    /** Recalage « façon Chroma », mesuré sur les démonstrations de Chroma
+        (Xynth) : un partiel dont le demi-ton le plus proche appartient à la
+        gamme n'est PAS touché (son léger désaccord naturel est conservé) ; sinon
+        il est déplacé d'un nombre entier de demi-tons vers la note de la gamme
+        la plus proche, et son écart (en cents) est réduit de moitié
+        (detuneKeep = 0.5). Renvoie la hauteur MIDI cible (fractionnaire). */
+    inline double chromaTargetMidi (double midi, uint16_t mask, double detuneKeep = 0.5) noexcept
+    {
+        if ((mask & 0x0FFF) == 0)
+            return midi;
+
+        const int n = (int) std::floor (midi + 0.5);
+        if (maskContains (mask, n))
+            return midi;                                   // déjà dans la gamme : intact
+
+        const double dev = midi - (double) n;              // écart au demi-ton, −0.5..0.5
+        const double target = nearestScaleMidi ((double) n, mask);
+        return target + dev * detuneKeep;
+    }
 }

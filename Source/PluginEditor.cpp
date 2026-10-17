@@ -31,6 +31,17 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         p.apvts, ParamIDs::mix, mixKnob);
 
+    colorKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    colorKnob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    colorKnob.setRotaryParameters (juce::degreesToRadians (-135.0f), juce::degreesToRadians (135.0f), true);
+    colorKnob.setDoubleClickReturnValue (true, 100.0);
+    colorKnob.setMouseDragSensitivity (260);
+    colorKnob.setTitle ("color");
+    colorKnob.onValueChange = [this] { repaint (colorArea.expanded (40, 30)); };
+    addAndMakeVisible (colorKnob);
+    colorAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        p.apvts, ParamIDs::color, colorKnob);
+
     addAndMakeVisible (modeToggle);
     addAndMakeVisible (noteRow);
 
@@ -45,6 +56,7 @@ void FrameCanvas::resized()
     spectrumBand.setBounds (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     mixKnob.setBounds   (knobArea);
+    colorKnob.setBounds (colorArea);
     modeToggle.setBounds (modeArea);
     noteRow.setBounds   (noteArea);
 }
@@ -164,15 +176,23 @@ void FrameCanvas::paint (juce::Graphics& g)
         g.drawHorizontalLine (596, x, juce::jmin (x + 2.0f, right));
 
     const auto knobC = knobArea.toFloat().getCentre();
+    const auto colorC = colorArea.toFloat().getCentre();
     drawCallout (g, "mix  -  dry / wet", { left, 616.0f }, { knobC.x, (float) knobArea.getY() + 2.0f }, true);
-    drawCallout (g, "mode", { 330.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
-    drawCallout (g, "tonic", { 600.0f, 616.0f },
+    drawCallout (g, "color", { 240.0f, 616.0f }, { colorC.x, (float) colorArea.getY() + 2.0f }, true);
+    drawCallout (g, "mode", { 382.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
+    drawCallout (g, "tonic", { 620.0f, 616.0f },
                  { (float) noteArea.getX() + noteArea.getWidth() * ((float) noteRow.getNote() + 0.5f) / 12.0f,
                    (float) noteArea.getY() - 2.0f }, true);
 
     // Valeur du MIX sous le potentiomètre
     const auto mixText = juce::String (juce::roundToInt (mixKnob.getValue())) + " %";
     drawMonoText (g, mixText, { knobC.x - 60.0f, (float) knobArea.getBottom() + 2.0f, 120.0f, 16.0f },
+                  12.0f, J::centred, Palette::ink, true);
+
+    // Valeur du COLOR ; au-delà de 100 % la queue de résonance s'active.
+    const int colorValue = juce::roundToInt (colorKnob.getValue());
+    drawMonoText (g, juce::String (colorValue) + " %" + (colorValue > 100 ? "  + tail" : ""),
+                  { colorC.x - 70.0f, (float) colorArea.getBottom() + 2.0f, 140.0f, 16.0f },
                   12.0f, J::centred, Palette::ink, true);
 
     // ---- Pied de page : récapitulatif « rapport scientifique » ----------------

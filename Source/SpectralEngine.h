@@ -27,7 +27,13 @@
          pas, on recale.
       5. Le même déplacement / phaseur est appliqué à chaque canal : l'image
          stéréo est conservée.
-      6. Résonance harmonique (« chroma ») : chaque partiel tonal recalé excite
+      5b. Recalage « façon Chroma » (mesuré sur les démos de Chroma) : les
+         partiels déjà dans la gamme ne bougent pas ; les autres sont déplacés
+         d'un nombre entier de demi-tons, en gardant la moitié de leur écart.
+      5c. Peigne harmonique COLOR : renfort étroit (+4 dB) sur les fréquences
+         des notes de la gamme, creux (−6 dB) entre elles, 250 Hz – 12 kHz,
+         niveau global compensé. Pas de filtre qui sonne : aucune queue.
+      6. Résonance harmonique (COLOR > 100 %) : chaque partiel tonal recalé excite
          une banque de résonateurs accordés sur les notes de la gamme. Chaque
          résonateur excité sonne sa note avec 5 harmoniques, et appelle aussi
          l'octave, la tierce et la quinte DE LA GAMME au-dessus : l'harmonie est
@@ -101,8 +107,14 @@ public:
         Réservé aux tests / à l'usage interne : le plugin utilise 1. */
     void setCorrectionAmount (float amount) noexcept { correctionAmount = juce::jlimit (0.0f, 1.0f, amount); }
 
-    /** Intensité de la résonance harmonique (0 = recalage seul, 1 = défaut).
-        Usage interne / tests. */
+    /** COLOR, comme sur Chroma (0…2, soit 0–200 %) :
+          0 → 1   : profondeur du peigne harmonique (notes de la gamme renforcées,
+                    espace entre elles creusé, niveau global compensé) ;
+          1 → 2   : en plus, queue de résonance harmonique (accords de la gamme,
+                    T60 ≈ 4 s). */
+    void setColour (float colourAmount) noexcept;
+
+    /** Réglage direct de la queue de résonance (tests). */
     void setResonanceAmount (float amount) noexcept { resonanceAmount = juce::jlimit (0.0f, 2.0f, amount); }
 
     /** Durée de la queue de résonance (pour getTailLengthSeconds). */
@@ -121,6 +133,8 @@ private:
     void processFrame() noexcept;
     float targetFrequencyFor (float hz) const noexcept;
     void publishVisualFrame (int numChannelsUsed) noexcept;
+    void applyColourComb (int numChannelsUsed) noexcept;
+    void computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept;
     void updateResonators() noexcept;
     void addResonators (int numChannelsUsed) noexcept;
     void addSinusoid (std::vector<Complex>& Z, float binPos, float amplitude, float phase0) const noexcept;
@@ -172,13 +186,19 @@ private:
     float scaleFade = 1.0f;                       // 0 → 1 : de previousMask vers currentMask
     float scaleFadeStep = 0.25f;
 
+    // --- peigne COLOR ----------------------------------------------------------
+    float colour = 1.0f;
+    std::vector<float> combCurveDb, combPrevCurveDb, combGain;
+    uint16_t combMask = 0xFFFF, combPrevMask = 0xFFFF;
+    float combNorm = 1.0f;
+
     // --- résonance harmonique -------------------------------------------------
     static constexpr int resLowNote  = 28;        // E1 ≈ 41 Hz
     static constexpr int resHighNote = 100;       // E7 ≈ 2.6 kHz (fondamentales)
     static constexpr int numResonators = resHighNote - resLowNote + 1;
     static constexpr int resPartials = 5;
     static constexpr int resChannels = 2;
-    float resonanceAmount = 1.0f;
+    float resonanceAmount = 0.0f;                 // piloté par COLOR (> 100 %)
     float resAttack = 0.25f, resDecay = 0.99f;
     std::array<float, numResonators> resEnergy {}, resExcite {};
     std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhase {};

@@ -21,7 +21,8 @@ struct WaveSlice
 
 namespace ParamIDs
 {
-    inline constexpr const char* mix  = "mix";
+    inline constexpr const char* mix   = "mix";
+    inline constexpr const char* color = "color";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
 }
@@ -86,6 +87,8 @@ private:
     SpectralEngine engine;
 
     std::atomic<float>* mixParam  = nullptr;
+    std::atomic<float>* colorParam = nullptr;
+    float colourSmoothed = 1.0f;          // COLOR lissé de bloc en bloc
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* noteParam = nullptr;
 

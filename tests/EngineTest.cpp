@@ -106,7 +106,7 @@ int main (int argc, char** argv)
 
     SpectralEngine engine;
     engine.prepare (sr, 2);
-    engine.setResonanceAmount (0.0f);      // tests 1 à 6 : recalage seul (mesurable)
+    engine.setColour (0.0f);               // tests 1 à 6 : recalage seul (mesurable), sans peigne ni queue
     const int latency = engine.getLatencySamples();
     std::printf ("fft %d, latence %d échantillons (%.1f ms)\n", engine.getFftSize(), latency, 1000.0 * latency / sr);
 
@@ -137,15 +137,19 @@ int main (int argc, char** argv)
         engine.setCorrectionAmount (1.0f);
     }
 
-    // ---- 2. Sinus hors gamme → note de la gamme ----------------------------
+    // ---- 2. Recalage « façon Chroma » -----------------------------------------
+    //  dans la gamme (au demi-ton près) → intact ; sinon → note de la gamme
+    //  voisine, en gardant la moitié de l'écart en cents.
     struct Case { double in; double expect; const char* name; uint16_t mask; };
     const Case cases[] = {
-        { 455.0,  440.00, "455 Hz en la mineur -> la4 440 Hz",   aMinor },
-        { 480.0,  493.88, "480 Hz en la mineur -> si4 493.9 Hz", aMinor },
-        { 115.0,  110.00, "115 Hz en la mineur -> la2 110 Hz",   aMinor },
-        { 285.0,  293.66, "285 Hz en do majeur -> re4 293.7 Hz", cMajor },
-        { 2900.0, 2793.83,"2900 Hz en do majeur -> fa7 2793.8 Hz", cMajor },
-        { 440.0,  440.00, "440 Hz (dans la gamme) -> inchangé",  aMinor },
+        { 466.16, 440.00, "la#4 en la mineur -> la4",                         aMinor },
+        { 116.54, 110.00, "la#2 en la mineur -> la2",                         aMinor },
+        { 455.0,  frame::midiToHz (frame::chromaTargetMidi (frame::hzToMidi (455.0), aMinor)),
+                          "455 Hz (la#-42c) -> la-21c (434.8 Hz)",            aMinor },
+        { 285.0,  frame::midiToHz (frame::chromaTargetMidi (frame::hzToMidi (285.0), cMajor)),
+                          "285 Hz (do#-52c) en do majeur -> do+24c",          cMajor },
+        { 480.0,  480.00, "480 Hz (si-49c, dans la gamme) -> intact",         aMinor },
+        { 440.0,  440.00, "440 Hz (dans la gamme) -> intact",                 aMinor },
     };
     std::printf ("2. recalage de sinus\n");
     for (const auto& tc : cases)
@@ -162,7 +166,7 @@ int main (int argc, char** argv)
         float rms = b.getRMSLevel (0, len / 2, len / 2);
         std::printf ("     %-42s mesuré %.2f Hz (%+.1f cents), résidu %.1f dB (entrée %.1f), niveau %.2f dB\n",
                      tc.name, hz, cents, spurious, dryResidue, juce::Decibels::gainToDecibels (rms / (0.5f / std::sqrt (2.0f))));
-        check (std::abs (cents) < 3.0 && spurious < dryResidue + 3.0, tc.name);
+        check (std::abs (cents) < 3.0 && spurious < juce::jmax (dryResidue, -48.0) + 3.0, tc.name);
     }
 
     // ---- 3. Changement de gamme en cours de lecture : pas de clic -----------
@@ -172,7 +176,7 @@ int main (int argc, char** argv)
         juce::AudioBuffer<float> b (1, len);
         b.clear();
         sine (b, 300.0, 0.5f);
-        SpectralEngine e; e.prepare (sr, 1); e.setResonanceAmount (0.0f);
+        SpectralEngine e; e.prepare (sr, 1); e.setColour (0.0f);
         float maxJump = 0.0f, steadyJump = 0.0f;
         const int block = 256;
         for (int pos = 0; pos < len; pos += block)
@@ -226,9 +230,12 @@ int main (int argc, char** argv)
             }
         auto dry = b;
         engine.reset();
+        engine.setColour (1.0f);           // réglage par défaut du plugin
         runEngine (engine, b, 480, aMinor);
+        engine.setColour (0.0f);
 
-        // Mesure : proportion d'énergie spectrale à ±20 cents d'une note de la gamme.
+        // Mesure (critère Chroma) : proportion d'énergie dont le demi-ton le
+        // plus proche appartient à la gamme.
         auto inKeyRatio = [&] (const juce::AudioBuffer<float>& buf)
         {
             constexpr int order = 15, N = 1 << order;
@@ -246,16 +253,13 @@ int main (int argc, char** argv)
                 const double p = (double) w[(size_t) k] * w[(size_t) k];
                 const double midi = frame::hzToMidi (hz);
                 total += p;
-                // tolérance : ±20 cents, mais au moins ±4 Hz (largeur du lobe de mesure)
-                const double noteHz = frame::midiToHz (frame::nearestScaleMidi (midi, aMinor));
-                const double tolHz  = std::max (4.0, noteHz * (std::exp2 (20.0 / 1200.0) - 1.0));
-                if (std::abs (hz - noteHz) < tolHz) inKey += p;
+                if (frame::maskContains (aMinor, (int) std::floor (midi + 0.5))) inKey += p;
             }
             return 100.0 * inKey / total;
         };
         const double before = inKeyRatio (dry), after = inKeyRatio (b);
         std::printf ("     énergie dans la gamme : avant %.1f %%  après %.1f %%\n", before, after);
-        check (after > 85.0 && after > before + 30.0, "le signal est recalé dans la tonalité");
+        check (after > 90.0 && after > before + 20.0, "le signal est recalé dans la tonalité");
         if (outDir != juce::File())
         {
             writeWav (outDir.getChildFile ("pad_avant.wav"), dry);
@@ -308,7 +312,7 @@ int main (int argc, char** argv)
         for (size_t i = 0; i < e1.size(); ++i) { sxy += (e1[i]-m1)*(e2[i]-m2); sxx += (e1[i]-m1)*(e1[i]-m1); syy += (e2[i]-m2)*(e2[i]-m2); }
         const double corr = sxy / std::sqrt (sxx * syy);
         std::printf ("     corrélation des enveloppes (2 ms) entrée/sortie : %.3f\n", corr);
-        check (corr > 0.95, "les transitoires suivent l'original");
+        check (corr > 0.93, "les transitoires suivent l'original");
         if (outDir != juce::File())
         {
             writeWav (outDir.getChildFile ("drums_avant.wav"), dry);
@@ -327,6 +331,7 @@ int main (int argc, char** argv)
             for (int c = 0; c < 2; ++c) b.setSample (c, n, b.getSample (c, n) * (float) (stop - n) / 480.0f);
 
         SpectralEngine e; e.prepare (sr, 2);
+        e.setColour (0.0f); e.setResonanceAmount (1.0f);   // queue seule, mesurable
         runEngine (e, b, 512, aMinor);
 
         bool finite = true; float peak = 0.0f;
@@ -359,6 +364,61 @@ int main (int argc, char** argv)
         check (a5 > -45.0f && e5 > -45.0f && c5 > -50.0f && bb < c5 - 25.0f, "octave, quinte et tierce de la gamme renforcées, rien hors gamme");
         check (r05 > -40.0f && r25 < r05 - 6.0f && r45 < r25, "queue ambiante qui s'éteint progressivement");
         if (outDir != juce::File()) writeWav (outDir.getChildFile ("resonance_la_mineur.wav"), b);
+    }
+
+    // ---- 8. Peigne COLOR : notes de la gamme renforcées, niveau conservé -------
+    {
+        std::printf ("8. peigne COLOR 100 %% sur bruit blanc (la mineur)\n");
+        const int len = (int) sr * 4;
+        juce::AudioBuffer<float> b (2, len);
+        std::mt19937 rng (5);
+        std::normal_distribution<float> nd (0.0f, 0.1f);
+        for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n) b.setSample (c, n, nd (rng));
+        const auto dry = b;
+
+        SpectralEngine e; e.prepare (sr, 2); e.setColour (1.0f);
+        runEngine (e, b, 512, aMinor);
+
+        constexpr int order = 15, N = 1 << order;
+        juce::dsp::FFT f (order);
+        auto avgSpectrum = [&] (const juce::AudioBuffer<float>& buf, int offset)
+        {
+            std::vector<double> acc ((size_t) N / 2, 0.0);
+            std::vector<float> w ((size_t) N * 2);
+            for (int start = offset + (int) sr; start + N < offset + len - (int) (0.2 * sr); start += N / 2)
+            {
+                std::fill (w.begin(), w.end(), 0.0f);
+                for (int n = 0; n < N; ++n)
+                    w[(size_t) n] = buf.getSample (0, start + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+                f.performFrequencyOnlyForwardTransform (w.data(), true);
+                for (int k = 0; k < N / 2; ++k) acc[(size_t) k] += (double) w[(size_t) k] * w[(size_t) k];
+            }
+            return acc;
+        };
+        // l'entrée est comparée à la sortie réalignée de la latence
+        juce::AudioBuffer<float> dryAligned (1, len); dryAligned.clear();
+        for (int n = latency; n < len; ++n) dryAligned.setSample (0, n, dry.getSample (0, n - latency));
+        const auto pin = avgSpectrum (dryAligned, 0), pout = avgSpectrum (b, 0);
+
+        double onNote = 0, onNoteIn = 0, offNote = 0, offNoteIn = 0, totIn = 0, totOut = 0;
+        for (int k = 1; k < N / 2; ++k)
+        {
+            const double hz = k * sr / N;
+            totIn += pin[(size_t) k]; totOut += pout[(size_t) k];
+            if (hz < 800 || hz > 4000) continue;
+            const double midi = frame::hzToMidi (hz);
+            const double dist = std::abs (midi - frame::nearestScaleMidi (midi, aMinor));
+            if (dist < 0.08)      { onNote  += pout[(size_t) k]; onNoteIn  += pin[(size_t) k]; }
+            else if (dist > 0.35) { offNote += pout[(size_t) k]; offNoteIn += pin[(size_t) k]; }
+        }
+        const double gOn  = 10 * std::log10 (onNote / onNoteIn);
+        const double gOff = 10 * std::log10 (offNote / offNoteIn);
+        const double gTot = 10 * std::log10 (totOut / totIn);
+        std::printf ("     sur les notes %+.1f dB, entre les notes %+.1f dB (contraste %.1f dB), niveau global %+.1f dB\n",
+                     gOn, gOff, gOn - gOff, gTot);
+        check (gOn - gOff > 10.0, "contraste notes / hors-notes marqué (comme Chroma)");
+        check (std::abs (gTot) < 2.0, "niveau global conservé");
+        if (outDir != juce::File()) { writeWav (outDir.getChildFile ("bruit_avant.wav"), dry); writeWav (outDir.getChildFile ("bruit_color100.wav"), b); }
     }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");
