@@ -33,9 +33,12 @@
       5c. Peigne harmonique COLOR : renfort étroit (+4 dB) sur les fréquences
          des notes de la gamme, creux (−6 dB) entre elles, 250 Hz – 12 kHz,
          niveau global compensé. Pas de filtre qui sonne : aucune queue.
+      5d. Voix d'harmoniseur : chaque partiel recalé est doublé par sa tierce et
+         sa quinte DE LA GAMME (régions déplacées, phase continue, timbre
+         conservé), montée douce ~85 ms.
       6. Harmoniques justes : chaque partiel recalé reçoit son octave, sa double
          octave et sa douzième si la quinte est dans la gamme, en phase avec
-         lui (aucune queue). Dosé par COLOR.
+         lui (aucune queue).
       7. IFFT, fenêtre de synthèse de Hann, overlap-add.
 
     Contraintes temps réel : toutes les mémoires sont allouées dans prepare().
@@ -99,9 +102,9 @@ public:
         Réservé aux tests / à l'usage interne : le plugin utilise 1. */
     void setCorrectionAmount (float amount) noexcept { correctionAmount = juce::jlimit (0.0f, 1.0f, amount); }
 
-    /** COLOR, comme sur Chroma (0…1, soit 0–100 %) : profondeur du peigne
-        harmonique (notes de la gamme renforcées, espace entre elles creusé,
-        niveau global compensé) et des harmoniques justes ajoutées. */
+    /** Intensité harmonique interne (0…1). Le plugin l'utilise à 1 en
+        permanence (le bouton COLOR a été retiré en 1.5) ; 0 sert aux tests.
+        Pilote le peigne, les harmoniques justes et les voix d'harmoniseur. */
     void setColour (float colourAmount) noexcept;
 
     /** Traite le bloc en place : en sortie, le signal 100 % traité ("wet"),
@@ -120,6 +123,7 @@ private:
     void applyColourComb (int numChannelsUsed) noexcept;
     void computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept;
     void addHarmonics (int numChannelsUsed) noexcept;
+    int scaleStepAbove (int midiNote, int steps) const noexcept;
     void addSinusoid (std::vector<Complex>& Z, float binPos, float amplitude, float phase0) const noexcept;
 
     // --- configuration -------------------------------------------------------
@@ -157,6 +161,13 @@ private:
 
     std::vector<int>   prevOwner;                 // pour chaque bin : index du pic qui le possédait à la trame précédente (-1 sinon)
     std::vector<float> prevTheta;                 // θ des pics de la trame précédente
+
+    // Voix d'harmoniseur : tierce (2 degrés) et quinte (4 degrés) de la gamme.
+    static constexpr int numVoices = 2;
+    static constexpr int voiceSteps[numVoices] = { 2, 4 };
+    static constexpr float voiceGain[numVoices] = { 0.34f, 0.40f };   // ≈ −9.4 dB / −8 dB
+    std::array<std::vector<float>, numVoices> prevVoiceTheta, voiceThetaArr, voiceGainArr;
+    std::array<std::vector<int>, numVoices> voiceShiftArr;
     std::vector<float> prevPeakTrueHz;            // fréquence réelle des pics précédents
     std::vector<int>   prevTonalAge, peakTonalAge;// nb de trames où le partiel est stable
     std::vector<float> prevMagnitude;             // spectre mid précédent (détection d'attaque)

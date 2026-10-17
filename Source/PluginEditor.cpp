@@ -21,7 +21,6 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     addAndMakeVisible (partialBand);
 
     setupKnob (mixKnob,    "mix",    100.0, knobArea,   mixAttachment,    ParamIDs::mix);
-    setupKnob (colorKnob,  "color",  100.0, colorArea,  colorAttachment,  ParamIDs::color);
     setupKnob (reverbKnob, "reverb",  30.0, reverbArea, reverbAttachment, ParamIDs::reverb);
 
     addAndMakeVisible (modeToggle);
@@ -54,7 +53,6 @@ void FrameCanvas::resized()
     spectrumBand.setBounds (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     mixKnob.setBounds    (knobArea);
-    colorKnob.setBounds  (colorArea);
     reverbKnob.setBounds (reverbArea);
     modeToggle.setBounds (modeArea);
     noteRow.setBounds   (noteArea);
@@ -175,13 +173,11 @@ void FrameCanvas::paint (juce::Graphics& g)
         g.drawHorizontalLine (596, x, juce::jmin (x + 2.0f, right));
 
     const auto knobC = knobArea.toFloat().getCentre();
-    const auto colorC = colorArea.toFloat().getCentre();
     const auto reverbC = reverbArea.toFloat().getCentre();
     drawCallout (g, "mix", { left, 616.0f }, { knobC.x, (float) knobArea.getY() + 2.0f }, true);
-    drawCallout (g, "color", { 196.0f, 616.0f }, { colorC.x, (float) colorArea.getY() + 2.0f }, true);
-    drawCallout (g, "reverb", { 310.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
-    drawCallout (g, "mode", { 470.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
-    drawCallout (g, "tonic", { 640.0f, 616.0f },
+    drawCallout (g, "reverb", { 236.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
+    drawCallout (g, "mode", { 420.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
+    drawCallout (g, "tonic", { 630.0f, 616.0f },
                  { (float) noteArea.getX() + noteArea.getWidth() * ((float) noteRow.getNote() + 0.5f) / 12.0f,
                    (float) noteArea.getY() - 2.0f }, true);
 
@@ -193,11 +189,7 @@ void FrameCanvas::paint (juce::Graphics& g)
                   { reverbC.x - 55.0f, (float) reverbArea.getBottom() + 2.0f, 110.0f, 16.0f },
                   12.0f, J::centred, Palette::ink, true);
 
-    // Valeur du COLOR.
-    const int colorValue = juce::roundToInt (colorKnob.getValue());
-    drawMonoText (g, juce::String (colorValue) + " %",
-                  { colorC.x - 58.0f, (float) colorArea.getBottom() + 2.0f, 116.0f, 16.0f },
-                  12.0f, J::centred, Palette::ink, true);
+
 
     // ---- Pied de page : récapitulatif « rapport scientifique » ----------------
     const int note = juce::jlimit (0, 11, noteRow.getNote());

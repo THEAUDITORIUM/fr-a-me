@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque
 hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
 transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
 
-Cinq contrôles : **mix** (0–100 %), **color** (0–100 %, comme sur Chroma), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **mode** (major / minor), **note** (tonique, 12 notes).
+Quatre contrôles : **mix** (0–100 %), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -122,13 +122,13 @@ Résultats obtenus pendant le développement (48 kHz) :
 | la#4 en la mineur → la4 | 440.02 Hz, aucun résidu ajouté |
 | 480 Hz (si−49 cents, déjà dans la gamme) | intact, 479.98 Hz |
 | changement de gamme pendant la lecture | aucune discontinuité |
-| accord de scies désaccordées (pad), COLOR 100 % | énergie dont le demi-ton est dans la gamme : 66 % → 95 % |
+| accord de scies désaccordées (pad) | énergie dont le demi-ton est dans la gamme : 66 % → 97 % |
 | percussions : enveloppe 2 ms entrée/sortie | corrélation 0.98 (attaques conservées) |
-| la3 tenu, COLOR 100 % : harmoniques justes | ×2 à −9 dB, ×3 (mi) à −12 dB, ×4 à −14 dB ; la# hors gamme à −55 dB |
-| bruit blanc, COLOR 100 % (la mineur) | notes +6 dB, entre les notes −11 dB, niveau global −0.6 dB |
-| salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 96 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
+| la3 tenu : voix + harmoniques | tierce (do) −12 dB, quinte (mi) −10 dB, ×2 −8 dB, ×3 −9 dB, ×4 −10 dB ; hors gamme < −55 dB |
+| bruit blanc (la mineur) | notes +7 dB, entre les notes −14 dB, niveau global −0.5 dB |
+| salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 98 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
 | REVERB 100 % sur 40 s de bruit continu | niveau stable (pas d'emballement du nuage réinjecté) |
-| automation brutale COLOR / REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| automation brutale REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -198,11 +198,16 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
 
-**COLOR** (0–100 %) dose à la fois le peigne harmonique (100 % : +5.5 dB sur les notes,
-−8 dB entre elles, un peu plus marqué que Chroma) et les **harmoniques justes** : chaque
-partiel recalé reçoit son octave (×2), sa double octave (×4) et sa douzième (×3) quand la
-quinte est dans la gamme, en phase avec lui. Elles naissent et meurent avec la note : aucune
-queue, transitoires intacts.
+**Harmonie (toujours active, sans réglage — l'ancien bouton COLOR a été retiré).**
+Trois couches, appliquées à chaque note recalée :
+
+- *Voix d'harmoniseur* : la note est doublée par sa **tierce** et sa **quinte de la gamme**
+  (−9 / −8 dB), obtenues en déplaçant les bins du partiel lui-même : timbre, souffle et
+  enveloppe conservés, phase continue, montée douce ~85 ms.
+- *Harmoniques justes* : octave (×2), double octave (×4) et douzième (×3) quand la quinte
+  est dans la gamme, en phase avec la note, sans queue.
+- *Peigne harmonique* : +7 dB sur les fréquences des notes de la gamme, −11 dB entre elles
+  (250 Hz – 12 kHz, niveau global compensé), y compris sur le bruit et les transitoires.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
@@ -210,7 +215,7 @@ amortis, pré-délai, T60 de 1.5 s à 12 s. Un **nuage granulaire** vit *dans* l
 des grains de 80 à 350 ms prélevés dans la queue, à l'unisson ou à l'octave (au-dessus ou
 en dessous), placés au hasard dans l'espace stéréo, puis réinjectés dans la réverbe où ils
 se fondent. La réverbe est placée **avant** le moteur harmonique : toute la queue, grains
-compris, est ensuite recalée, enrichie et peignée → une réverbe entièrement dans la
+compris, est ensuite recalée, harmonisée et peignée → une réverbe entièrement dans la
 tonalité. Niveau normalisé : la queue ne s'emballe pas, même à 100 % sur un son tenu.
 
 **Sécurité** : entrée et sortie assainies (aucune valeur invalide ne peut sortir ni
@@ -248,7 +253,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **color** (double-clic = 100 %), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **mix** (double-clic = 100 %), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

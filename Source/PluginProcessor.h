@@ -23,7 +23,6 @@ struct WaveSlice
 namespace ParamIDs
 {
     inline constexpr const char* mix   = "mix";
-    inline constexpr const char* color = "color";
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
@@ -90,9 +89,7 @@ private:
     AmbientReverb reverb;                 // avant le moteur : la queue est harmonisée elle aussi
 
     std::atomic<float>* mixParam  = nullptr;
-    std::atomic<float>* colorParam = nullptr;
     std::atomic<float>* reverbParam = nullptr;
-    float colourSmoothed = 1.0f;          // COLOR lissé de bloc en bloc
     float reverbSmoothed = 0.3f;          // REVERB lissé de bloc en bloc
     std::atomic<bool> prepared { false }; // prepareToPlay a été appelé
     bool engineNeedsReset = false;        // auto-réparation après une valeur invalide

@@ -16,7 +16,6 @@ FrameAudioProcessor::FrameAudioProcessor()
       apvts (*this, nullptr, "FRAME_STATE", createParameterLayout())
 {
     mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
-    colorParam = apvts.getRawParameterValue (ParamIDs::color);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
@@ -36,17 +35,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 2. COLOR : 0–100 %, défaut 100 % (comme Chroma) : peigne harmonique et
-    //    harmoniques justes.
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::color, 2 }, "color",
-        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
-        AudioParameterFloatAttributes()
-            .withLabel ("%")
-            .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
-            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
-
-    // 3. REVERB : 0–100 %, défaut 30 %. Réverbe ambient (FDN) avec nuage
+    // 2. REVERB : 0–100 %, défaut 30 %. Réverbe ambient (FDN) avec nuage
     //    granulaire réinjecté, placée avant le moteur : queue dans la tonalité.
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::reverb, 2 }, "reverb",
@@ -56,11 +45,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 4. MODE : major / minor.
+    // 3. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
 
-    // 5. NOTE : tonique parmi les 12 notes.
+    // 4. NOTE : tonique parmi les 12 notes.
     StringArray notes;
     for (auto* n : frame::noteNames)
         notes.add (n);
@@ -157,7 +146,6 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         engine.reset();
         reverb.reset();
         dryDelay.clear();
-        colourSmoothed = colorParam->load() * 0.01f;
         reverbSmoothed = reverbParam->load() * 0.01f;
         engineNeedsReset = false;
     }
@@ -165,16 +153,12 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
     mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
 
-    // COLOR et REVERB : lissage exponentiel (~60 ms), une fois par bloc. La
+    // REVERB : lissage exponentiel (~60 ms), une fois par bloc. La
     // fréquence d'échantillonnage vient de prepareToPlay (jamais 0 ici).
     const double sr = currentSampleRate.load();
     const float blockSeconds = (float) ((double) buffer.getNumSamples() / (sr > 0.0 ? sr : 44100.0));
     const float k = juce::jlimit (0.0f, 1.0f, 1.0f - std::exp (-blockSeconds / 0.06f));
 
-    const float colourTarget = juce::jlimit (0.0f, 1.0f, finiteOrZero (colorParam->load()) * 0.01f);
-    colourSmoothed += (colourTarget - colourSmoothed) * k;
-    if (! std::isfinite (colourSmoothed)) colourSmoothed = colourTarget;
-    engine.setColour (colourSmoothed);
 
     const float reverbTarget = juce::jlimit (0.0f, 1.0f, finiteOrZero (reverbParam->load()) * 0.01f);
     reverbSmoothed += (reverbTarget - reverbSmoothed) * k;
