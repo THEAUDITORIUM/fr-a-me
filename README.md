@@ -216,6 +216,14 @@ se fondent. La réverbe est placée **avant** le moteur harmonique : toute la qu
 compris, est ensuite recalée, harmonisée et peignée → une réverbe entièrement dans la
 tonalité. Niveau normalisé : la queue ne s'emballe pas, même à 100 % sur un son tenu.
 
+**Garde-fou « tout le son passe »** : le plugin compare en continu l'énergie du son
+traité à celle du son d'origine (aligné). Si le traité tombe à plus de 6 dB sous
+l'original alors que celui-ci joue, le son direct est réinjecté automatiquement (en ~30 ms,
+retrait en ~600 ms) : aucune partie du son ne peut disparaître, quel que soit l'hôte. En
+usage normal il ne s'active jamais (vérifié : 0 bloc actif sur des hi-hats et 60 s de
+musique) ; sur une perte simulée de 30 dB, il rétablit le niveau d'origine. Le pied de
+page affiche la version, les niveaux d'entrée et de sortie, et « direct restored » quand il agit.
+
 **Sécurité** : entrée et sortie assainies (aucune valeur invalide ne peut sortir ni
 contaminer le mixeur de l'hôte), auto-réinitialisation du moteur si besoin, limiteur doux
 transparent sous −1 dBFS qui plafonne la sortie à 0 dBFS, appels de l'hôte avant

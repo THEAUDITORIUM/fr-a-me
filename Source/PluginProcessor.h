@@ -76,6 +76,11 @@ public:
     int getLatencyInSamples() const noexcept { return engine.getLatencySamples(); }
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
 
+    /** Vu-mètres (dBFS crête, lissés) et état du garde-fou, pour l'interface. */
+    float getInputLevelDb() const noexcept  { return inputLevelDb.load(); }
+    float getOutputLevelDb() const noexcept { return outputLevelDb.load(); }
+    bool  isDirectRestoreActive() const noexcept { return restoreActive.load(); }
+
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -93,6 +98,17 @@ private:
     float reverbSmoothed = 0.3f;          // REVERB lissé de bloc en bloc
     std::atomic<bool> prepared { false }; // prepareToPlay a été appelé
     bool engineNeedsReset = false;        // auto-réparation après une valeur invalide
+
+    // Garde-fou « tout le son passe » : énergies lissées du son d'origine
+    // (retardé) et du son traité ; si le traité tombe loin sous l'original,
+    // le son direct est réinjecté dans le chemin traité.
+    float guardDry = 0.0f, guardWet = 0.0f, directRestore = 0.0f;
+    float guardCoef = 0.001f, restoreAttack = 0.1f, restoreRelease = 0.01f;
+    uint32_t guardCounter = 0;
+
+    float meterIn = 0.0f, meterOut = 0.0f, meterCoef = 0.001f;
+    std::atomic<float> inputLevelDb { -100.0f }, outputLevelDb { -100.0f };
+    std::atomic<bool> restoreActive { false };
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* noteParam = nullptr;
 

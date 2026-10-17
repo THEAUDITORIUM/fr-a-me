@@ -7,6 +7,10 @@
 #include "PluginEditor.h"
 #include "Scale.h"
 
+#ifndef JucePlugin_VersionString
+ #define JucePlugin_VersionString "dev"
+#endif
+
 //==============================================================================
 //  FrameCanvas
 //==============================================================================
@@ -90,6 +94,7 @@ void FrameCanvas::refresh()
 
     inputBand.repaint();
     outputBand.repaint();
+    repaint (juce::Rectangle<int> (0, 730, designWidth, 22));   // pied de page : niveaux
     spectrumBand.repaint();
     partialBand.repaint();
 }
@@ -200,8 +205,13 @@ void FrameCanvas::paint (juce::Graphics& g)
     g.setColour (Palette::faint);
     g.drawHorizontalLine (728, left, right);
     drawMonoText (g, "scale : " + scaleName, { left, 734.0f, 300.0f, 14.0f }, 9.5f, J::centredLeft, Palette::graphite);
-    drawMonoText (g, "stft " + juce::String (latency) + " / hann / 75 % overlap",
-                  { 0.0f, 734.0f, (float) designWidth, 14.0f }, 9.5f, J::centred, Palette::graphite);
+    // Version + niveaux d'entrée / sortie (et garde-fou s'il agit).
+    juce::String centre = "v" JucePlugin_VersionString "   in " + juce::String (processor.getInputLevelDb(), 1)
+                        + " db   out " + juce::String (processor.getOutputLevelDb(), 1) + " db";
+    if (processor.isDirectRestoreActive())
+        centre << "   direct restored";
+    drawMonoText (g, centre, { 0.0f, 734.0f, (float) designWidth, 14.0f }, 9.5f, J::centred,
+                  processor.isDirectRestoreActive() ? Palette::ink : Palette::graphite);
     drawMonoText (g, "latency : " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)",
                   { right - 300.0f, 734.0f, 300.0f, 14.0f }, 9.5f, J::centredRight, Palette::graphite);
 }

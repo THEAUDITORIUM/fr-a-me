@@ -94,6 +94,15 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSlice = {};
     sliceCount = 0;
     engineNeedsReset = false;
+
+    // Garde-fou et vu-mètres : constantes de temps.
+    guardCoef      = 1.0f - std::exp (-1.0f / (0.15f * (float) sampleRate));   // énergie sur ~150 ms
+    restoreAttack  = 1.0f - std::exp (-32.0f / (0.03f * (float) sampleRate)); // réinjection en ~30 ms
+    restoreRelease = 1.0f - std::exp (-32.0f / (0.6f  * (float) sampleRate)); // retrait en ~600 ms
+    meterCoef      = 1.0f - std::exp (-1.0f / (0.3f  * (float) sampleRate));
+    guardDry = guardWet = 0.0f;
+    directRestore = 0.0f;
+    meterIn = meterOut = 0.0f;
     prepared = true;
 }
 
@@ -147,6 +156,8 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         engine.reset();
         reverb.reset();
         dryDelay.clear();
+        guardDry = guardWet = 0.0f;
+        directRestore = 0.0f;
         reverbSmoothed = reverbParam->load() * 0.01f;
         engineNeedsReset = false;
     }
@@ -190,6 +201,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + nuage granulaire
     engine.process (wetView);                                // 2. recalage + harmoniques + peigne (queue comprise)
+   #ifdef FRAME_TEST_SIMULATE_WET_LOSS
+    wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
+   #endif
 
     const int delayLength = dryDelay.getNumSamples();
     bool invalid = false;
@@ -210,7 +224,16 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             const float delayed = line[dryDelayWritePos];
             line[dryDelayWritePos] = x;
 
-            const float y = safetyLimit (delayed + m * (wetBuffer.getSample (c, i) - delayed), invalid);
+            // Garde-fou « tout le son passe » : si le chemin traité a perdu une
+            // grande partie du son d'origine, le son direct est réinjecté.
+            const float rawWet = wetBuffer.getSample (c, i);
+            const float wet = rawWet + directRestore * delayed;
+
+            // La perte se mesure AVANT correction (sinon le garde-fou se freinerait lui-même).
+            guardDry += (delayed * delayed - guardDry) * guardCoef;
+            guardWet += (rawWet * rawWet - guardWet) * guardCoef;
+
+            const float y = safetyLimit (delayed + m * (wet - delayed), invalid);
             buffer.setSample (c, startSample + i, y);
 
             inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
@@ -219,6 +242,25 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
         if (++dryDelayWritePos >= delayLength)
             dryDelayWritePos = 0;
+
+        // Mise à jour du garde-fou, une fois par paquet de 32 échantillons.
+        if ((++guardCounter & 31) == 0)
+        {
+            float target = 0.0f;
+            if (guardDry > 1.0e-7f)                               // le son d'origine joue (> −70 dBFS)
+            {
+                const float ratio = std::sqrt (guardWet / guardDry);
+                // traité à moins de −6 dB de l'original : on réinjecte progressivement
+                target = juce::jlimit (0.0f, 1.0f, (0.5f - ratio) / 0.35f);
+            }
+            const float k = target > directRestore ? restoreAttack : restoreRelease;
+            directRestore += (target - directRestore) * k;
+            if (! std::isfinite (directRestore) || directRestore < 1.0e-4f) directRestore = target > 0.0f ? directRestore : 0.0f;
+            if (! std::isfinite (guardDry) || ! std::isfinite (guardWet)) { guardDry = guardWet = 0.0f; directRestore = 0.0f; }
+        }
+
+        meterIn  += (inHi - inLo  - meterIn)  * meterCoef;
+        meterOut += (outHi - outLo - meterOut) * meterCoef;
 
         // Tranche de forme d'onde pour l'interface.
         currentSlice.inMin  = juce::jmin (currentSlice.inMin, inLo);
@@ -236,6 +278,10 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
     if (invalid)
         engineNeedsReset = true;     // le moteur sera réinitialisé au prochain bloc
+
+    inputLevelDb.store  (juce::Decibels::gainToDecibels (0.5f * meterIn,  -100.0f));
+    outputLevelDb.store (juce::Decibels::gainToDecibels (0.5f * meterOut, -100.0f));
+    restoreActive.store (directRestore > 0.05f);
 }
 
 void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
