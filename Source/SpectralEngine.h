@@ -27,7 +27,18 @@
          pas, on recale.
       5. Le même déplacement / phaseur est appliqué à chaque canal : l'image
          stéréo est conservée.
-      6. IFFT, fenêtre de synthèse de Hann, overlap-add.
+      6. Résonance harmonique (« chroma ») : chaque partiel tonal recalé excite
+         une banque de résonateurs accordés sur les notes de la gamme. Chaque
+         résonateur excité sonne sa note avec 5 harmoniques, et appelle aussi
+         l'octave, la tierce et la quinte DE LA GAMME au-dessus : l'harmonie est
+         renforcée en accords dans la tonalité. Les résonateurs montent en
+         douceur (~90 ms) et s'éteignent lentement (T60 ≈ 4 s), avec un léger
+         désaccord gauche/droite : une queue ambiante, comme une réverbe qui
+         ne jouerait que des notes justes. Ils sont synthétisés directement
+         dans le domaine spectral (noyau de Hann exact, phase continue). Les
+         régions tonales recalées sont aussi légèrement amplifiées (+2 dB).
+         Bruit et transitoires n'excitent pas les résonateurs.
+      7. IFFT, fenêtre de synthèse de Hann, overlap-add.
 
     Contraintes temps réel : toutes les mémoires sont allouées dans prepare().
     process() n'alloue rien et ne prend aucun verrou. Les données de
@@ -39,6 +50,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_dsp/juce_dsp.h>
+#include <array>
 #include <atomic>
 #include <complex>
 #include <memory>
@@ -89,6 +101,13 @@ public:
         Réservé aux tests / à l'usage interne : le plugin utilise 1. */
     void setCorrectionAmount (float amount) noexcept { correctionAmount = juce::jlimit (0.0f, 1.0f, amount); }
 
+    /** Intensité de la résonance harmonique (0 = recalage seul, 1 = défaut).
+        Usage interne / tests. */
+    void setResonanceAmount (float amount) noexcept { resonanceAmount = juce::jlimit (0.0f, 2.0f, amount); }
+
+    /** Durée de la queue de résonance (pour getTailLengthSeconds). */
+    static constexpr float resonanceT60Seconds = 4.0f;
+
     /** Traite le bloc en place : en sortie, le signal 100 % traité ("wet"),
         retardé de getLatencySamples(). Nombre de canaux ≤ maxNumChannels. */
     void process (juce::AudioBuffer<float>& buffer) noexcept;
@@ -102,6 +121,10 @@ private:
     void processFrame() noexcept;
     float targetFrequencyFor (float hz) const noexcept;
     void publishVisualFrame (int numChannelsUsed) noexcept;
+    void updateResonators() noexcept;
+    void addResonators (int numChannelsUsed) noexcept;
+    void addSinusoid (std::vector<Complex>& Z, float binPos, float amplitude, float phase0) const noexcept;
+    int scaleStepAbove (int midiNote, int steps) const noexcept;
 
     // --- configuration -------------------------------------------------------
     double sampleRate = 44100.0;
@@ -148,6 +171,18 @@ private:
     uint16_t currentMask = 0, previousMask = 0;
     float scaleFade = 1.0f;                       // 0 → 1 : de previousMask vers currentMask
     float scaleFadeStep = 0.25f;
+
+    // --- résonance harmonique -------------------------------------------------
+    static constexpr int resLowNote  = 28;        // E1 ≈ 41 Hz
+    static constexpr int resHighNote = 100;       // E7 ≈ 2.6 kHz (fondamentales)
+    static constexpr int numResonators = resHighNote - resLowNote + 1;
+    static constexpr int resPartials = 5;
+    static constexpr int resChannels = 2;
+    float resonanceAmount = 1.0f;
+    float resAttack = 0.25f, resDecay = 0.99f;
+    std::array<float, numResonators> resEnergy {}, resExcite {};
+    std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhase {};
+    std::array<std::array<std::array<float, resChannels>, resPartials>, numResonators> resPhaseOffset {};
 
     // --- visualisation --------------------------------------------------------
     LockFreeQueue<SpectralFrameInfo, 32> visualQueue;

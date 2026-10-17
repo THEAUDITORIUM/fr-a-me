@@ -106,6 +106,7 @@ int main (int argc, char** argv)
 
     SpectralEngine engine;
     engine.prepare (sr, 2);
+    engine.setResonanceAmount (0.0f);      // tests 1 à 6 : recalage seul (mesurable)
     const int latency = engine.getLatencySamples();
     std::printf ("fft %d, latence %d échantillons (%.1f ms)\n", engine.getFftSize(), latency, 1000.0 * latency / sr);
 
@@ -171,7 +172,7 @@ int main (int argc, char** argv)
         juce::AudioBuffer<float> b (1, len);
         b.clear();
         sine (b, 300.0, 0.5f);
-        SpectralEngine e; e.prepare (sr, 1);
+        SpectralEngine e; e.prepare (sr, 1); e.setResonanceAmount (0.0f);
         float maxJump = 0.0f, steadyJump = 0.0f;
         const int block = 256;
         for (int pos = 0; pos < len; pos += block)
@@ -313,6 +314,51 @@ int main (int argc, char** argv)
             writeWav (outDir.getChildFile ("drums_avant.wav"), dry);
             writeWav (outDir.getChildFile ("drums_apres_do_majeur.wav"), b);
         }
+    }
+
+    // ---- 7. Résonance harmonique : accord dans la gamme + queue ambiante -----
+    {
+        std::printf ("7. résonance harmonique (la4 tenu 1 s puis silence, la mineur)\n");
+        const int len = (int) sr * 5, stop = (int) sr;
+        juce::AudioBuffer<float> b (2, len);
+        b.clear();
+        sine (b, 440.0, 0.4f, 0, stop);
+        for (int n = stop - 480; n < stop; ++n)               // fin du sinus en fondu (pas de clic)
+            for (int c = 0; c < 2; ++c) b.setSample (c, n, b.getSample (c, n) * (float) (stop - n) / 480.0f);
+
+        SpectralEngine e; e.prepare (sr, 2);
+        runEngine (e, b, 512, aMinor);
+
+        bool finite = true; float peak = 0.0f;
+        for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n)
+        { const float v = b.getSample (c, n); finite &= std::isfinite (v); peak = juce::jmax (peak, std::abs (v)); }
+
+        // Niveau des notes de l'accord pendant la note tenue (fenêtre 0.5–1 s, réalignée)
+        auto bandLevel = [&] (int start, double hz)
+        {
+            constexpr int order = 14, N = 1 << order;
+            juce::dsp::FFT f (order);
+            std::vector<float> w ((size_t) N * 2, 0.0f);
+            for (int n = 0; n < N; ++n)
+                w[(size_t) n] = b.getSample (0, start + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+            f.performFrequencyOnlyForwardTransform (w.data(), true);
+            const int k = (int) std::lround (hz * N / sr);
+            float m = 0; for (int j = k - 3; j <= k + 3; ++j) m = juce::jmax (m, w[(size_t) j]);
+            return juce::Decibels::gainToDecibels (m / (N * 0.25f), -150.0f);
+        };
+        const int hold = latency + (int) (0.6 * sr);
+        const float a4 = bandLevel (hold, 440.0), a5 = bandLevel (hold, 880.0),
+                    e5 = bandLevel (hold, 659.26), c5 = bandLevel (hold, 523.25), bb = bandLevel (hold, 466.16);
+        std::printf ("     pendant : la4 %.1f dB  la5 %.1f  mi5 (quinte) %.1f  do5 (tierce) %.1f  | la#4 (hors gamme) %.1f\n", a4, a5, e5, c5, bb);
+
+        auto rms = [&] (double t0) { return juce::Decibels::gainToDecibels (b.getRMSLevel (0, latency + (int) (t0 * sr), (int) (0.2 * sr)), -150.0f); };
+        const float r05 = rms (1.5), r25 = rms (3.0), r45 = rms (4.6);
+        std::printf ("     queue après l'arrêt : +0.5 s %.1f dB, +2 s %.1f dB, +3.6 s %.1f dB ; crête %.2f\n", r05, r25, r45, peak);
+
+        check (finite && peak < 1.0f, "pas de saturation ni de valeur invalide");
+        check (a5 > -45.0f && e5 > -45.0f && c5 > -50.0f && bb < c5 - 25.0f, "octave, quinte et tierce de la gamme renforcées, rien hors gamme");
+        check (r05 > -40.0f && r25 < r05 - 6.0f && r45 < r25, "queue ambiante qui s'éteint progressivement");
+        if (outDir != juce::File()) writeWav (outDir.getChildFile ("resonance_la_mineur.wav"), b);
     }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");

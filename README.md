@@ -124,6 +124,8 @@ Résultats obtenus pendant le développement (48 kHz) :
 | changement de gamme pendant la lecture | aucune discontinuité |
 | accord de scies désaccordées (pad) | énergie dans la gamme : 10 % → 88.6 % |
 | percussions : enveloppe 2 ms entrée/sortie | corrélation 0.98 (attaques conservées) |
+| la4 tenu (la mineur) : octave / quinte / tierce ajoutées | −25 / −26 / −29 dB ; la# hors gamme à −67 dB |
+| queue de résonance après l'arrêt | −27 dB à 0.5 s, −50 dB à 2 s, −74 dB à 3.6 s |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -180,6 +182,16 @@ viennent d'apparaître passent avec leur phase d'origine : kicks, caisses claire
 consonnes restent nets. L'infra-grave (< 25 Hz) et l'extrême aigu (> 16 kHz) ne sont
 pas touchés.
 
+**Résonance harmonique (« chroma »).** Chaque partiel tonal recalé excite une banque de
+résonateurs accordés sur les notes de la gamme (E1 → E7). Un résonateur excité sonne sa
+note avec 5 harmoniques et appelle aussi l'octave, la tierce et la quinte *de la gamme*
+au-dessus : l'harmonie se renforce en accords dans la tonalité. Montée douce (~90 ms),
+extinction lente (T60 ≈ 4 s), léger désaccord gauche/droite : une queue ambiante, large,
+qui ne joue que des notes justes. Les régions tonales recalées gagnent aussi ~2 dB.
+Le bruit et les attaques n'excitent pas les résonateurs, les drums restent secs.
+Les résonateurs sont synthétisés directement dans le spectre (noyau de Hann exact,
+phase continue), sans coût notable.
+
 **Resynthèse.** IFFT, fenêtre de synthèse de Hann, overlap-add normalisé
 (reconstruction parfaite quand rien n'est déplacé).
 
@@ -194,7 +206,7 @@ latence est conservée.
 **Temps réel.** Toute la mémoire est allouée dans `prepareToPlay`. Le thread audio
 n'alloue rien et ne prend aucun verrou ; les formes d'onde et les trames spectrales
 partent vers l'interface par deux `LockFreeQueue` (juce::AbstractFifo). Coût mesuré :
-moins de 2 % d'un cœur en stéréo à 48 kHz (build Release).
+environ 2.5 % d'un cœur en stéréo à 48 kHz (build Release).
 
 ---
 

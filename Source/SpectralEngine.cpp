@@ -103,6 +103,21 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     // Durée du fondu lors d'un changement de gamme : ~100 ms.
     scaleFadeStep = juce::jlimit (0.05f, 1.0f, (float) hopSize / (float) (0.1 * sampleRate));
 
+    // Résonateurs : montée ~90 ms, extinction T60 = resonanceT60Seconds.
+    {
+        const float framesPerSecond = (float) (sampleRate / hopSize);
+        resAttack = 1.0f - std::exp (-1.0f / (0.09f * framesPerSecond));
+        resDecay  = std::pow (10.0f, -3.0f / (resonanceT60Seconds * framesPerSecond));
+
+        // Phases de départ aléatoires (fixes) par note / harmonique / canal :
+        // les canaux ne sont pas corrélés, la queue s'ouvre en stéréo.
+        juce::Random rng (0xC0FFEE);
+        for (auto& note : resPhaseOffset)
+            for (auto& partial : note)
+                for (auto& ph : partial)
+                    ph = twoPi * rng.nextFloat();
+    }
+
     // Lignes du spectrogramme (axe logarithmique) → plages de bins.
     rowBinStart.assign (SpectralFrameInfo::numSpectrumRows, 0);
     rowBinEnd.assign   (SpectralFrameInfo::numSpectrumRows, 0);
@@ -133,6 +148,9 @@ void SpectralEngine::reset() noexcept
     prevNumPeaks = 0;
 
     rover = fftSize - hopSize;
+    resEnergy.fill (0.0f);
+    resExcite.fill (0.0f);
+    resPhase = resPhaseOffset;
     numPeaks = 0;
     firstFrame = true;
     previousMask = currentMask;
@@ -365,9 +383,13 @@ void SpectralEngine::processFrame() noexcept
 
         std::fill (Z.begin(), Z.end(), Complex {});
 
+        // Les partiels tonaux (donc recalés dans la gamme) sont renforcés.
+        const float tonalGain = 1.0f + 0.26f * resonanceAmount;   // ≈ +2 dB
+
         for (int p = 0; p < numPeaks; ++p)
         {
-            const Complex rot = std::polar (1.0f, peakTheta[(size_t) p]);
+            const float gain = peakTonalAge[(size_t) p] >= 1 ? tonalGain : 1.0f;
+            const Complex rot = std::polar (gain, peakTheta[(size_t) p]);
             const int shift = peakShift[(size_t) p];
             const int s = juce::jmax (regionStart[(size_t) p], -shift);
             const int e = juce::jmin (regionEnd[(size_t) p], numBins - 1 - shift);
@@ -376,7 +398,16 @@ void SpectralEngine::processFrame() noexcept
                 Z[(size_t) (k + shift)] += X[(size_t) k] * rot;
         }
 
+    }
+
+    // ---- 6b. Résonance harmonique -------------------------------------------
+    updateResonators();
+    addResonators (nch);
+
+    for (int c = 0; c < nch; ++c)
+    {
         // DC et Nyquist doivent rester réels pour une IFFT réelle.
+        auto& Z = spectrumOut[(size_t) c];
         Z[0] = { Z[0].real(), 0.0f };
         Z[(size_t) (numBins - 1)] = { Z[(size_t) (numBins - 1)].real(), 0.0f };
     }
@@ -404,6 +435,128 @@ void SpectralEngine::processFrame() noexcept
     firstFrame = false;
     if (scaleFade < 1.0f)
         scaleFade = juce::jmin (1.0f, scaleFade + scaleFadeStep);
+}
+
+//==============================================================================
+//  Résonance harmonique
+//==============================================================================
+int SpectralEngine::scaleStepAbove (int midiNote, int steps) const noexcept
+{
+    // Monte de `steps` degrés dans la gamme courante (2 = tierce, 4 = quinte).
+    int n = midiNote;
+    for (int found = 0, guard = 0; found < steps && guard < 24; ++guard)
+        if (frame::maskContains (currentMask, ++n))
+            ++found;
+    return n;
+}
+
+void SpectralEngine::updateResonators() noexcept
+{
+    const float fullScale = (float) fftSize * 0.25f;
+    resExcite.fill (0.0f);
+
+    auto excite = [this] (int note, float amp)
+    {
+        const int i = note - resLowNote;
+        if (i >= 0 && i < numResonators)
+            resExcite[(size_t) i] = juce::jmax (resExcite[(size_t) i], amp);
+    };
+
+    if (resonanceAmount > 0.0f && currentMask != 0)
+    {
+        for (int p = 0; p < numPeaks; ++p)
+        {
+            if (peakTonalAge[(size_t) p] < 1)
+                continue;                                 // bruit, attaques : pas d'excitation
+
+            const float amp = magnitude[(size_t) peakBin[(size_t) p]] / fullScale;
+            if (amp < 2.0e-4f)                            // < −74 dBFS : ignoré
+                continue;
+
+            const int note = (int) std::lround (frame::hzToMidi (peakTargetHz[(size_t) p]));
+            if (! frame::maskContains (currentMask, note))
+                continue;
+
+            excite (note,                         amp);          // la note elle-même
+            excite (note + 12,                    amp * 0.45f);  // octave
+            excite (scaleStepAbove (note, 4),     amp * 0.38f);  // quinte de la gamme
+            excite (scaleStepAbove (note, 2),     amp * 0.30f);  // tierce de la gamme
+        }
+    }
+
+    for (int i = 0; i < numResonators; ++i)
+    {
+        float& e = resEnergy[(size_t) i];
+        const float target = resExcite[(size_t) i];
+
+        if (! frame::maskContains (currentMask, resLowNote + i))
+            e *= 0.6f;                                    // hors gamme (après un changement) : extinction rapide
+        else if (target > e)
+            e += (target - e) * resAttack;                // montée douce (« bloom »)
+        else
+            e *= resDecay;                                // longue queue
+
+        if (e < 1.0e-6f)
+            e = 0.0f;
+    }
+}
+
+void SpectralEngine::addSinusoid (std::vector<Complex>& Z, float k0, float amplitude, float phase0) const noexcept
+{
+    // Spectre exact d'une sinusoïde fenêtrée par Hann (fenêtre de N points) :
+    //   X[k] = A/2 · e^{j(φ − πδ)} · N·(½ sinc δ + ¼ sinc(δ−1) + ¼ sinc(δ+1)),  δ = k − k0
+    // sur ±4 bins autour de k0 (au-delà, < −90 dB).
+    const int kc = (int) std::lround (k0);
+    const float scale = 0.5f * amplitude * (float) fftSize;
+
+    auto sinc = [] (float x) { return std::abs (x) < 1.0e-6f ? 1.0f : std::sin (pi * x) / (pi * x); };
+
+    for (int k = juce::jmax (1, kc - 4); k <= juce::jmin (numBins - 2, kc + 4); ++k)
+    {
+        const float d = (float) k - k0;
+        const float w = 0.5f * sinc (d) + 0.25f * (sinc (d - 1.0f) + sinc (d + 1.0f));
+        Z[(size_t) k] += std::polar (scale * w, phase0 - pi * d);
+    }
+}
+
+void SpectralEngine::addResonators (int nch) noexcept
+{
+    static constexpr float partialGain[resPartials] = { 1.0f, 0.5f, 0.28f, 0.16f, 0.09f };
+    static constexpr float detune[resChannels] = { 0.9992f, 1.0008f };   // ±1.4 cent : largeur stéréo
+
+    const float maxHz = juce::jmin (12000.0f, (float) sampleRate * 0.45f);
+    const float hopSeconds = (float) hopSize / (float) sampleRate;
+
+    // Normalisation : la somme des amplitudes reste sous ~−11 dBFS, quel que
+    // soit le nombre de notes qui sonnent.
+    float total = 0.0f;
+    for (float e : resEnergy) total += e;
+    const float level = 0.42f * resonanceAmount;
+    const float norm = (total * level > 0.28f) ? 0.28f / (total * level) : 1.0f;
+
+    for (int i = 0; i < numResonators; ++i)
+    {
+        const float e = resEnergy[(size_t) i];
+        const float f0 = (float) frame::midiToHz (resLowNote + i);
+
+        for (int h = 0; h < resPartials; ++h)
+        {
+            const float f = f0 * (float) (h + 1);
+
+            for (int c = 0; c < resChannels; ++c)
+            {
+                const float fc = f * (nch > 1 ? detune[c] : 1.0f);
+                float& ph = resPhase[(size_t) i][(size_t) h][(size_t) c];
+
+                if (e > 0.0f && f < maxHz && c < nch)
+                    addSinusoid (spectrumOut[(size_t) c], fc / binHz, e * level * norm * partialGain[h], ph);
+
+                // La phase avance à chaque trame, que la note sonne ou non :
+                // elle reprend toujours de façon continue.
+                ph = wrapPhase (ph + twoPi * fc * hopSeconds);
+            }
+        }
+    }
 }
 
 //==============================================================================
