@@ -257,13 +257,12 @@ la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi p
 (type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
 saut de phase. À 0, contourné : son strictement inchangé.
 
-**Thèmes** (en haut à droite) : petit arbre = **garden**, le thème au lancement — une
-prairie : verts d'herbe, papier de dune, voile de ciel lavande derrière le titre, collages
-d'herbes couchées par le vent dans les marges, touffes de graminées en bas de page, brin et
-épis au crayon. Fleur = **floral** (2.4, remplace « sun ») — rose pétale : encre prune,
-accent rose, lavis d'aquarelle au bord plus foncé, pétales veinés dans les marges,
-éclaboussures d'encre rouille, petite fleur au crayon. Le thème est sauvegardé avec le
-projet (les projets en « sun » s'ouvrent en floral).
+**Thèmes** (en haut à droite), volontairement sobres — le blanc domine, le rose et le vert
+dosés par touches : petit arbre = **garden**, le thème au lancement (verts d'herbe, trois
+aplats d'herbe couchée dans les marges avec quelques fleurs roses, brin au crayon au bouton
+rose) ; fleur = **floral** (rose pétale : encre prune, trois pétales veinés dans les marges,
+petite fleur rose à la tige verte). Le thème est sauvegardé avec le projet (les projets en
+« sun » s'ouvrent en floral).
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus

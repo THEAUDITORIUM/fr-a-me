@@ -40,9 +40,9 @@ namespace Palette
         {
             case Theme::garden:
                 // prairie : vert d'herbe, papier de dune, encre de mousse
-                paper = juce::Colour (0xffeff0e3); ink = juce::Colour (0xff1d2a1a);
+                paper = juce::Colour (0xfffafbf7); ink = juce::Colour (0xff1d2a1a);
                 graphite = juce::Colour (0xff4b5a40); pencil = juce::Colour (0xff94a083);
-                faint = juce::Colour (0xffd6dcc6); accent = juce::Colour (0xff9cc35c);
+                faint = juce::Colour (0xffe3e8da); accent = juce::Colour (0xffa9cc6e);
                 accentInk = juce::Colour (0xff5d8a2b); scaleInk = juce::Colour (0xff4e7f24);
                 scoreBlack = juce::Colour (0xff1a2716); scoreDot = juce::Colour (0xffe7edd6);
                 onAccent = juce::Colour (0xff1d2a1a);
@@ -50,9 +50,9 @@ namespace Palette
             case Theme::floral:
             default:
                 // rose pétale : papier blanc rosé, encre prune, accent rose, cœur framboise
-                paper = juce::Colour (0xfff8f2f1); ink = juce::Colour (0xff3b1a26);
+                paper = juce::Colour (0xfffdfafa); ink = juce::Colour (0xff3b1a26);
                 graphite = juce::Colour (0xff6f4b57); pencil = juce::Colour (0xffbb98a2);
-                faint = juce::Colour (0xffefdfe2); accent = juce::Colour (0xfff2a9bd);
+                faint = juce::Colour (0xfff2e6e9); accent = juce::Colour (0xfff2b3c4);
                 accentInk = juce::Colour (0xffcf5a7d); scaleInk = juce::Colour (0xffbd3d66);
                 scoreBlack = juce::Colour (0xff2b1119); scoreDot = juce::Colour (0xfffbe9ee);
                 onAccent = juce::Colour (0xff3b1a26);
@@ -94,12 +94,12 @@ void drawMonoText (juce::Graphics& g, const juce::String& text, juce::Rectangle<
 /** Icônes de thème (fleur, petit arbre), dessinées au trait fin. */
 void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> area, bool selected);
 
-/** Décor du thème « garden » : grain de papier, aplats de collage végétal,
-    brin dessiné au crayon (inspiré des planches de référence). */
+/** Décor du thème « garden » (sobre) : trois aplats d'herbe couchée dans les
+    marges, brin au crayon ; le fond reste blanc. */
 void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page);
 
-/** Décor du thème « floral » : lavis d'aquarelle rose, pétales veinés dans les
-    marges, éclaboussures d'encre rouille, petite fleur au crayon. */
+/** Décor du thème « floral » (sobre) : trois pétales roses veinés dans les
+    marges, petite fleur au crayon ; le fond reste blanc. */
 void drawFloralDecor (juce::Graphics& g, juce::Rectangle<float> page);
 
 /** Ligne de rappel façon planche annotée : étiquette, trait horizontal,
