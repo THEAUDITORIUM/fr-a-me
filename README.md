@@ -1,8 +1,8 @@
 # fr(a)me — harmoniseur spectral
 
-Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque fréquence
-hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
-transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
+Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la gamme choisie
+— notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
+**sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
 Contrôles : **mix** (0–100 %), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gain** de sortie (−24 … +12 dB, petit bouton en haut à droite), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
@@ -202,25 +202,25 @@ avant/après de la démo vidéo de Chroma (Xynth) :
   extrait passé dans fr(a)me et dans Chroma, l'écart moyen par note est d'environ 1.5 dB
   entre 600 Hz et 4 kHz, pour un niveau identique (−8.0 dB / −8.0 dB).
 
-**Harmonie (toujours active, sans réglage — réglages de la version 1.4, l'ancien bouton
-COLOR étant figé à 100 %).** Deux couches, appliquées à chaque note recalée :
+**Harmonie sans latence (toujours active, dans la lignée de la 1.4).** Depuis la 1.9, le
+traitement audio se fait entièrement par filtres, comme un égaliseur en mode « zero
+latency » : **0 échantillon de retard** (vérifié : la réponse à un clic culmine au
+premier échantillon), FL Studio n'a rien à compenser.
 
-- *Harmoniques justes* : octave (×2), double octave (×4) et douzième (×3) quand la quinte
-  est dans la gamme, en phase avec la note : elles naissent et meurent avec elle, aucune
-  queue, transitoires intacts.
-- *Peigne harmonique* : +5.5 dB sur les fréquences des notes de la gamme, −8 dB entre
-  elles (250 Hz – 12 kHz, niveau global compensé), y compris sur le bruit et les transitoires.
+- *Peigne harmonique* : une cascade de cloches étroites (double précision), une sur
+  chaque note de la gamme de mi1 à mi8, puis un plateau de compensation dynamique
+  (≈ 250 Hz – 9 kHz, boucle fermée) qui ramène le niveau : contraste notes / entre les
+  notes ≈ 16 dB, comme la 1.4 poussée d'un cran ; le grave n'est pas touché.
+- *Harmoniques justes* : chaque note de la gamme est isolée, son signal analytique
+  z = A·e^{jθ} est formé, et ses harmoniques Re(z²)/A, Re(z³)/A², Re(z⁴)/A³ sont
+  recréées (octave, douzième si la quinte est dans la gamme, double octave), en phase
+  avec la note : ≈ −7 / −9 / −11 dB sous elle. Un détecteur « note centrée » (±50 cents)
+  empêche les bandes voisines de fabriquer de fausses harmoniques (son propre).
+- Changement de gamme : gains glissés (~120 ms), sans clic.
 
-**Résonances harmoniques (toujours actives).** Comme des cloches Pro-Q à +30 dB très
-étroites posées sur chaque note de la gamme, mais automatiques : une banque de
-résonateurs passe-bande (double précision) sur toutes les notes de la gamme de mi1 à mi8,
-temps de résonance 0.1–0.4 s. Même un clap, un hi-hat ou du souffle se met à chanter.
-Elles sont **cohérentes avec la gamme choisie** : chaque note est pondérée selon son degré —
-l'accord de la tonalité domine (tonique 1.0, quinte 0.9, tierce 0.85, mineure en mineur et
-majeure en majeur), puis sixte, quarte, septième, seconde ; les notes hors gamme ne
-résonnent jamais. En la mineur, la / do / mi dominent ; en mi majeur, mi / sol# / si. La
-part des résonances est bornée à ~+8 dB au-dessus du son entrant (le son d'origine reste
-toujours présent) et le volume global est compensé.
+Le déplacement des notes fausses (vocodeur de phase des versions ≤ 1.8) demande
+obligatoirement une analyse avec retard : il n'est plus utilisé pour le son. Le moteur
+spectral sert désormais uniquement aux visualisations.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
@@ -230,6 +230,15 @@ en dessous), placés au hasard dans l'espace stéréo, puis réinjectés dans la
 se fondent. La réverbe est placée **avant** le moteur harmonique : toute la queue, grains
 compris, est ensuite recalée, harmonisée et peignée → une réverbe entièrement dans la
 tonalité. Niveau normalisé : la queue ne s'emballe pas, même à 100 % sur un son tenu.
+
+**Particules (1.9)** : nuage plus dense (6 → 46 grains/s), éclats courts (30–90 ms) et
+grains longs (120–420 ms), unisson / octave / double octave au-dessus / octave en dessous,
+diffusion propre, filtre anti-repliement ; réinjection dans la réverbe stable par
+construction (seules les particules transposées reviennent dans la boucle, énergie
+plafonnée par rapport au son entrant). Niveau de la réverbe calé sur la 1.4.
+
+**Limiteur de sortie** : gain lissé lié en stéréo (attaque immédiate, relâchement
+120 ms, plafond −0.5 dBFS) au lieu d'un écrêtage : plus de grésillement près de 0 dB.
 
 **Garde-fou « tout le son passe »** : le plugin compare en continu l'énergie du son
 traité à celle du son d'origine (aligné). Si le traité tombe à plus de 6 dB sous
@@ -247,8 +256,7 @@ transparent sous −1 dBFS qui plafonne la sortie à 0 dBFS, appels de l'hôte a
 **Resynthèse.** IFFT, fenêtre de synthèse de Hann, overlap-add normalisé
 (reconstruction parfaite quand rien n'est déplacé).
 
-**Latence.** N échantillons (4096 à 48 kHz = 85 ms), déclarée à l'hôte via
-`setLatencySamples` : le DAW compense automatiquement. Le signal sec est retardé
+**Latence.** Aucune (0 échantillon) depuis la 1.9. Le signal sec est retardé
 d'autant, si bien que le MIX ne crée jamais de filtrage en peigne. En bypass, la
 latence est conservée.
 

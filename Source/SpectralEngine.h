@@ -157,6 +157,17 @@ private:
 
     std::vector<int>   prevOwner;                 // pour chaque bin : index du pic qui le possédait à la trame précédente (-1 sinon)
     std::vector<float> prevTheta;                 // θ des pics de la trame précédente
+    std::vector<int>   peakAncestor;              // ancêtre suivi (−1 si nouveau / non tonal)
+
+    // État des harmoniques justes (phase continue + amplitude lissée), par pic.
+    static constexpr int numHarmRanks = 3;        // ×2, ×3, ×4
+    struct HarmState
+    {
+        bool  valid = false;
+        float phase[numHarmRanks][2] {};
+        float amp[numHarmRanks][2] {};
+    };
+    std::vector<HarmState> harmState, prevHarmState;
     std::vector<float> prevPeakTrueHz;            // fréquence réelle des pics précédents
     std::vector<int>   prevTonalAge, peakTonalAge;// nb de trames où le partiel est stable
     std::vector<float> prevMagnitude;             // spectre mid précédent (détection d'attaque)

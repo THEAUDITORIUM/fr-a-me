@@ -11,7 +11,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SpectralEngine.h"
 #include "AmbientReverb.h"
-#include "HarmonicResonator.h"
+#include "ZeroLatencyHarmonizer.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -75,7 +75,8 @@ public:
 
     /** Masque de la gamme courante (lu par l'UI pour le surlignage). */
     uint16_t getCurrentScaleMask() const noexcept;
-    int getLatencyInSamples() const noexcept { return engine.getLatencySamples(); }
+    int getLatencyInSamples() const noexcept { return 0; }                       // aucun retard
+    int getAnalysisFftSize() const noexcept  { return engine.getFftSize(); }     // pour l'axe temporel
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
 
     /** Vu-mètres (dBFS crête, lissés) et état du garde-fou, pour l'interface. */
@@ -92,9 +93,9 @@ private:
     void accumulateWave (const juce::AudioBuffer<float>& in, const juce::AudioBuffer<float>& out,
                          int numChannels, int numSamples) noexcept;
 
-    SpectralEngine engine;
-    AmbientReverb reverb;                 // avant le moteur : la queue est harmonisée elle aussi
-    HarmonicResonator resonator;          // après le moteur : résonances sur les notes de la gamme
+    SpectralEngine engine;                // analyse pour l'affichage (ne touche pas au son)
+    AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
+    ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
 
     std::atomic<float>* mixParam  = nullptr;
     std::atomic<float>* reverbParam = nullptr;
@@ -112,6 +113,10 @@ private:
     uint32_t guardCounter = 0;
 
     float meterIn = 0.0f, meterOut = 0.0f, meterCoef = 0.001f;
+
+    // Limiteur de sortie (gain lissé, sans écrêtage dur) : évite le grésillement
+    // quand les renforts harmoniques poussent le niveau vers 0 dBFS.
+    float limiterGain = 1.0f, limiterRelease = 0.001f;
     std::atomic<float> inputLevelDb { -100.0f }, outputLevelDb { -100.0f };
     std::atomic<bool> restoreActive { false };
     std::atomic<float>* modeParam = nullptr;
@@ -121,8 +126,7 @@ private:
 
     // Tampons pré-alloués (prepareToPlay) : aucun malloc dans processBlock.
     juce::AudioBuffer<float> dryBuffer, wetBuffer;
-    juce::AudioBuffer<float> dryDelay;     // ligne à retard du signal sec (= latence)
-    int dryDelayWritePos = 0;
+    juce::AudioBuffer<float> analysisBuffer;   // copie pour l'analyse spectrale (affichage)
     int maxChunk = 512;
 
     // Accumulation des tranches de forme d'onde.

@@ -230,7 +230,7 @@ void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)
 {
     // Axe temporel commun aux bandes : « maintenant » à droite.
     const double sr = processor.getCurrentSampleRate();
-    const double seconds = (double) WaveBand::historySize * (processor.getLatencyInSamples() / 8.0) / sr;
+    const double seconds = (double) WaveBand::historySize * (processor.getAnalysisFftSize() / 8.0) / sr;
 
     g.setColour (Palette::ink);
     g.drawHorizontalLine ((int) span.getY(), span.getX(), span.getRight());

@@ -85,21 +85,19 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
-    engine.prepare (sampleRate, 2);
-    engine.setColour (1.0f);                           // harmonie de la 1.4 (ancien COLOR à 100 %), fixe
+    harmonizer.prepare (sampleRate);                   // traitement harmonique : 0 latence
+    harmonizer.setScale (getCurrentScaleMask());
+    harmonizer.reset();
+    engine.prepare (sampleRate, 2);                    // analyse spectrale pour l'affichage uniquement
+    engine.setColour (1.0f);
     reverb.prepare (sampleRate, maxChunk);
-    resonator.prepare (sampleRate);
-    resonator.setScale (getCurrentScaleMask(), juce::jlimit (0, 11, (int) std::lround (noteParam->load())));
-    resonator.reset();
     outputGain.reset (sampleRate, 0.05);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainParam->load()));
-    setLatencySamples (engine.getLatencySamples());   // compensation de latence par l'hôte
+    setLatencySamples (0);                             // AUCUN retard : l'effet sonne avec le son
 
     dryBuffer.setSize (2, maxChunk, false, true, false);
     wetBuffer.setSize (2, maxChunk, false, true, false);
-    dryDelay.setSize  (2, juce::jmax (1, engine.getLatencySamples()), false, true, false);
-    dryDelay.clear();
-    dryDelayWritePos = 0;
+    analysisBuffer.setSize (2, maxChunk, false, true, false);
 
     mixSmoothed.reset (sampleRate, 0.05);              // 50 ms de lissage : pas de clic
     mixSmoothed.setCurrentAndTargetValue (mixParam->load() * 0.01f);
@@ -118,6 +116,8 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     guardDry = guardWet = 0.0f;
     directRestore = 0.0f;
     meterIn = meterOut = 0.0f;
+    limiterGain = 1.0f;
+    limiterRelease = 1.0f - std::exp (-1.0f / (0.12f * (float) sampleRate));
     prepared = true;
 }
 
@@ -134,7 +134,7 @@ namespace
     inline float safetyLimit (float y, bool& invalid) noexcept
     {
         if (! std::isfinite (y)) { invalid = true; return 0.0f; }
-        constexpr float knee = 0.891f, room = 1.0f - knee;
+        constexpr float knee = 0.97f, room = 1.0f - knee;
         const float a = std::abs (y);
         if (a <= knee) return y;
         return std::copysign (knee + room * std::tanh ((a - knee) / room), y);
@@ -169,17 +169,16 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (engineNeedsReset)
     {
         engine.reset();
+        harmonizer.reset();
         reverb.reset();
-        resonator.reset();
-        dryDelay.clear();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
         reverbSmoothed = reverbParam->load() * 0.01f;
         engineNeedsReset = false;
     }
 
-    engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
-    resonator.setScale (getCurrentScaleMask(), juce::jlimit (0, 11, (int) std::lround (finiteOrZero (noteParam->load()))));
+    engine.setScaleMask (getCurrentScaleMask());       // (affichage)
+    harmonizer.setScale (getCurrentScaleMask());       // gains glissés si la gamme change
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
     mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
 
@@ -217,14 +216,21 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
-    reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + nuage granulaire
-    engine.process (wetView);                                // 2. recalage + harmoniques + peigne (queue comprise)
-    resonator.process (wetView, numChannels, 1.0f);          // 3. résonances sur les notes de la gamme
+    reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
+    harmonizer.process (wetView, numChannels, 1.0f);         // 2. peigne + harmoniques justes (0 latence)
    #ifdef FRAME_TEST_SIMULATE_WET_LOSS
     wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
    #endif
 
-    const int delayLength = dryDelay.getNumSamples();
+    // Analyse spectrale de la sortie traitée, pour l'affichage seulement
+    // (copie : le son n'est jamais retardé par l'analyse).
+    for (int c = 0; c < numChannels; ++c)
+        analysisBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
+    {
+        juce::AudioBuffer<float> analysisView (analysisBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
+        engine.process (analysisView);
+    }
+
     bool invalid = false;
 
     for (int i = 0; i < numSamples; ++i)
@@ -233,16 +239,14 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         const float og = outputGain.getNextValue();
 
         float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
+        float outFrame[2] = { 0.0f, 0.0f };
 
         for (int c = 0; c < numChannels; ++c)
         {
             const float x = dryBuffer.getSample (c, i);
 
-            // Le signal sec est retardé de la même latence que le signal traité :
-            // dry et wet restent parfaitement alignés quel que soit le MIX.
-            float* line = dryDelay.getWritePointer (c);
-            const float delayed = line[dryDelayWritePos];
-            line[dryDelayWritePos] = x;
+            // Zéro latence : le son d'origine et le son traité sont alignés tels quels.
+            const float delayed = x;
 
             // Garde-fou « tout le son passe » : si le chemin traité a perdu une
             // grande partie du son d'origine, le son direct est réinjecté.
@@ -253,15 +257,29 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             guardDry += (delayed * delayed - guardDry) * guardCoef;
             guardWet += (rawWet * rawWet - guardWet) * guardCoef;
 
-            const float y = safetyLimit ((delayed + m * (wet - delayed)) * og, invalid);
-            buffer.setSample (c, startSample + i, y);
+            outFrame[c] = (delayed + m * (wet - delayed)) * og;
 
             inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
-            outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
         }
 
-        if (++dryDelayWritePos >= delayLength)
-            dryDelayWritePos = 0;
+        // Limiteur de sortie lié en stéréo : attaque immédiate, relâchement
+        // ~120 ms, plafond −0.5 dBFS. Le gain varie en douceur : pas
+        // d'écrêtage, donc pas de grésillement. Le tanh de sécurité ne sert
+        // plus qu'aux crêtes extrêmes.
+        float peak = 0.0f;
+        for (int c = 0; c < numChannels; ++c)
+            peak = juce::jmax (peak, std::abs (outFrame[c]));
+        constexpr float ceiling = 0.944f;                     // −0.5 dBFS
+        const float needed = peak > ceiling ? ceiling / peak : 1.0f;
+        limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
+        if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
+
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const float y = safetyLimit (outFrame[c] * limiterGain, invalid);
+            buffer.setSample (c, startSample + i, y);
+            outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
+        }
 
         // Mise à jour du garde-fou, une fois par paquet de 32 échantillons.
         if ((++guardCounter & 31) == 0)
@@ -307,43 +325,11 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
 void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // En bypass on garde la même latence (signal sec retardé) pour que l'hôte
-    // n'entende pas de saut temporel, et on continue d'alimenter le moteur
-    // pour une reprise sans résidu.
-    juce::ScopedNoDenormals noDenormals;
-    const int numChannels = juce::jmin (getTotalNumInputChannels(), getTotalNumOutputChannels(), 2);
-    if (numChannels <= 0 || ! prepared || buffer.getNumSamples() <= 0)
-        return;
-
-    const int delayLength = dryDelay.getNumSamples();
-
-    for (int start = 0; start < buffer.getNumSamples(); start += maxChunk)
-    {
-        const int n = juce::jmin (maxChunk, buffer.getNumSamples() - start);
-        for (int c = 0; c < numChannels; ++c)
-        {
-            float* w = wetBuffer.getWritePointer (c);
-            const float* in = buffer.getReadPointer (c, start);
-            for (int i = 0; i < n; ++i)
-                w[i] = finiteOrZero (in[i]);
-        }
-        juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, n);
-        engine.setScaleMask (getCurrentScaleMask());
-        engine.process (wetView);
-
-        for (int i = 0; i < n; ++i)
-        {
-            for (int c = 0; c < numChannels; ++c)
-            {
-                float* line = dryDelay.getWritePointer (c);
-                const float x = finiteOrZero (buffer.getSample (c, start + i));
-                buffer.setSample (c, start + i, line[dryDelayWritePos]);
-                line[dryDelayWritePos] = x;
-            }
-            if (++dryDelayWritePos >= delayLength)
-                dryDelayWritePos = 0;
-        }
-    }
+    // Zéro latence : en bypass, le son passe tel quel (rien à compenser).
+    for (int c = 0; c < buffer.getNumChannels(); ++c)
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+            if (! std::isfinite (buffer.getSample (c, i)))
+                buffer.setSample (c, i, 0.0f);
 }
 
 //==============================================================================

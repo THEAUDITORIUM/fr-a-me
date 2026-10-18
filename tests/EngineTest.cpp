@@ -17,7 +17,7 @@
 #include "../Source/SpectralEngine.h"
 #include "../Source/Scale.h"
 #include "../Source/AmbientReverb.h"
-#include "../Source/HarmonicResonator.h"
+#include "../Source/ZeroLatencyHarmonizer.h"
 
 #include <cstdio>
 #include <random>
@@ -503,16 +503,22 @@ int main (int argc, char** argv)
         check (finite, "aucune valeur invalide sous automation brutale");
     }
 
-    // ---- 11. Résonances harmoniques : cohérence avec la gamme -----------------
+    // ---- 11. Harmonie SANS LATENCE (moteur audio du plugin) -------------------
     {
-        const char* nm[12] = { "c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b" };
-        struct Key { int tonic; frame::Mode mode; const char* name; int third, fifth; };
-        const Key keys[] = { { 9, frame::Mode::minor, "la mineur", 3, 7 }, { 4, frame::Mode::major, "mi majeur", 4, 7 } };
-        for (const auto& key : keys)
+        std::printf ("11. harmonie sans latence (peigne + harmoniques justes), la mineur\n");
+        // a) zéro latence : la réponse à un clic culmine au premier échantillon
         {
-            std::printf ("11. résonances sur bruit blanc, %s\n", key.name);
-            const uint16_t mask = frame::scaleMask (key.tonic, key.mode);
-            HarmonicResonator h; h.prepare (sr); h.setScale (mask, key.tonic); h.reset();
+            ZeroLatencyHarmonizer h; h.prepare (sr); h.setScale (aMinor); h.reset();
+            juce::AudioBuffer<float> b (1, 4096); b.clear(); b.setSample (0, 0, 1.0f);
+            h.process (b, 1, 1.0f);
+            int peakAt = 0;
+            for (int n = 0; n < 4096; ++n) if (std::abs (b.getSample (0, n)) > std::abs (b.getSample (0, peakAt))) peakAt = n;
+            std::printf ("     clic : crête à l'échantillon %d\n", peakAt);
+            check (peakAt == 0, "zéro latence (aucun décalage avec le son d'origine)");
+        }
+        // b) bruit : contraste notes / entre les notes, niveau conservé
+        {
+            ZeroLatencyHarmonizer h; h.prepare (sr); h.setScale (aMinor); h.reset();
             const int len = (int) sr * 6;
             juce::AudioBuffer<float> b (2, len);
             std::mt19937 rng (1); std::normal_distribution<float> nd (0.0f, 0.1f);
@@ -533,28 +539,68 @@ int main (int argc, char** argv)
                 f.performFrequencyOnlyForwardTransform (w.data(), true);
                 for (int k = 0; k < N / 2; ++k) acc[(size_t) k] += (double) w[(size_t) k] * w[(size_t) k];
             }
-            double pc[12] = {}, tot = 0, on = 0;
+            double on = 0, off = 0, onN = 0, offN = 0;
             for (int k = 1; k < N / 2; ++k)
             {
                 const double hz = k * sr / N;
-                if (hz < 150 || hz > 3000) continue;
+                if (hz < 800 || hz > 4000) continue;
                 const double midi = frame::hzToMidi (hz);
-                const int nn = (int) std::lround (midi);
-                tot += acc[(size_t) k];
-                if (std::abs (midi - nn) < 0.1) { pc[((nn % 12) + 12) % 12] += acc[(size_t) k]; on += acc[(size_t) k]; }
+                const double d = std::abs (midi - frame::nearestScaleMidi (midi, aMinor));
+                if (d < 0.08) { on += acc[(size_t) k]; ++onN; } else if (d > 0.35) { off += acc[(size_t) k]; ++offN; }
             }
-            double mx = 0; for (double e : pc) mx = std::max (mx, e);
-            auto db = [&] (int p) { return 10.0 * std::log10 (pc[p] / mx + 1e-12); };
-            std::printf ("     ");
-            for (int i = 0; i < 12; ++i) std::printf ("%s:%+.0f ", nm[i], db (i));
-            double worstOut = -100, weakestChord = 0;
-            for (int i = 0; i < 12; ++i) if (! frame::maskContains (mask, i)) worstOut = std::max (worstOut, db (i));
-            for (int iv : { 0, key.third, key.fifth }) weakestChord = std::min (weakestChord, db ((key.tonic + iv) % 12));
+            const double contrast = 10.0 * std::log10 ((on / onN) / (off / offN));
             const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2));
-            std::printf ("\n     accord (tonique/tierce/quinte) ≥ %.1f dB, hors gamme ≤ %.1f dB, sur les notes %.0f %%, niveau %.1f dB (entrée -20)\n",
-                         weakestChord, worstOut, 100.0 * on / tot, lvl);
-            check (weakestChord > -5.0 && worstOut < -15.0, "accord de la tonalité dominant, rien hors gamme");
-            check (on / tot > 0.7 && std::abs (lvl + 20.0f) < 1.5f, "le bruit chante sur les notes, niveau conservé");
+            std::printf ("     bruit : contraste notes / entre les notes %.1f dB, niveau %.1f dB (entrée -20)\n", contrast, lvl);
+            check (contrast > 14.0 && std::abs (lvl + 20.0f) < 1.5f, "peigne marqué, niveau conservé");
+        }
+        // c) la3 tenu : harmoniques justes, rien hors gamme
+        {
+            ZeroLatencyHarmonizer h; h.prepare (sr); h.setScale (aMinor); h.reset();
+            const int len = (int) sr * 3;
+            juce::AudioBuffer<float> b (2, len);
+            b.clear(); sine (b, 220.0, 0.3f);
+            for (int pos = 0; pos < len; pos += 512)
+            {
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
+                h.process (v, 2, 1.0f);
+            }
+            auto bandLevel = [&] (double hz)
+            {
+                constexpr int order = 15, N = 1 << order;
+                juce::dsp::FFT f (order);
+                std::vector<float> w ((size_t) N * 2, 0.0f);
+                for (int n = 0; n < N; ++n) w[(size_t) n] = b.getSample (0, (int) sr + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+                f.performFrequencyOnlyForwardTransform (w.data(), true);
+                const int k = (int) std::lround (hz * N / sr);
+                float m = 0; for (int j = k - 4; j <= k + 4; ++j) m = juce::jmax (m, w[(size_t) j]);
+                return juce::Decibels::gainToDecibels (m / (N * 0.25f), -150.0f);
+            };
+            const float f1 = bandLevel (220), f2 = bandLevel (440), f3 = bandLevel (660), f4 = bandLevel (880), off = bandLevel (233.08);
+            std::printf ("     la3 %.1f dB | x2 %.1f | x3 (mi) %.1f | x4 %.1f | la#3 %.1f\n", f1, f2, f3, f4, off);
+            check (f2 > f1 - 10.0f && f3 > f1 - 12.5f && f4 > f1 - 14.5f, "harmoniques justes présentes (×2, ×3, ×4)");
+            check (off < f1 - 45.0f, "rien hors gamme");
+        }
+        // d) changements de gamme répétés pendant un son tenu : aucun clic
+        {
+            ZeroLatencyHarmonizer h; h.prepare (sr); h.reset();
+            const int len = (int) sr * 4;
+            juce::AudioBuffer<float> b (1, len);
+            b.clear(); sine (b, 300.0, 0.4f); sine (b, 1234.0, 0.1f);
+            float maxJump = 0.0f, steady = 0.0f;
+            for (int pos = 0, blk = 0; pos < len; pos += 256, ++blk)
+            {
+                h.setScale (frame::scaleMask ((blk / 40) % 12, (blk / 80) % 2 ? frame::Mode::minor : frame::Mode::major));
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 1, pos, juce::jmin (256, len - pos));
+                h.process (v, 1, 1.0f);
+            }
+            for (int n = (int) sr; n < len - 1; ++n)
+                maxJump = juce::jmax (maxJump, std::abs (b.getSample (0, n + 1) - b.getSample (0, n)));
+            ZeroLatencyHarmonizer h2; h2.prepare (sr); h2.setScale (aMinor); h2.reset();
+            juce::AudioBuffer<float> r (1, len); r.clear(); sine (r, 300.0, 0.4f); sine (r, 1234.0, 0.1f);
+            for (int pos = 0; pos < len; pos += 256) { juce::AudioBuffer<float> v (r.getArrayOfWritePointers(), 1, pos, juce::jmin (256, len - pos)); h2.process (v, 1, 1.0f); }
+            for (int n = (int) sr; n < len - 1; ++n) steady = juce::jmax (steady, std::abs (r.getSample (0, n + 1) - r.getSample (0, n)));
+            std::printf ("     changements de gamme : pente max %.4f (gamme fixe : %.4f)\n", maxJump, steady);
+            check (maxJump < 2.0f * steady + 0.01f, "changements de gamme sans clic");
         }
     }
 

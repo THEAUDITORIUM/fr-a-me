@@ -38,10 +38,10 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     numChannels = juce::jmax (1, maxNumChannels);
     activeChannels = numChannels;
 
-    // Taille de FFT proportionnelle à la fréquence d'échantillonnage pour garder
-    // ~85–93 ms de fenêtre (résolution ≈ 11 Hz) : 4096 à 44.1/48 kHz,
-    // 8192 à 88.2/96 kHz, 16384 au-delà.
-    fftOrder = sampleRate <= 50000.0 ? 12 : (sampleRate <= 100000.0 ? 13 : 14);
+    // Fenêtre de ~43–46 ms (2048 à 44.1/48 kHz, 4096 à 88.2/96 kHz, 8192 au-delà) :
+    // latence divisée par deux par rapport aux versions ≤ 1.8, l'effet suit le
+    // son de près ; le vocodeur de phase garde une estimation fine des fréquences.
+    fftOrder = sampleRate <= 50000.0 ? 11 : (sampleRate <= 100000.0 ? 12 : 13);
     fftSize  = 1 << fftOrder;
     hopSize  = fftSize / 4;                       // recouvrement 75 %
     numBins  = fftSize / 2 + 1;
@@ -95,6 +95,9 @@ void SpectralEngine::prepare (double newSampleRate, int maxNumChannels)
     peakOrder.assign    (maxPeaksInternal, 0);
     prevOwner.assign ((size_t) numBins, -1);
     prevTheta.assign (maxPeaksInternal, 0.0f);
+    peakAncestor.assign (maxPeaksInternal, -1);
+    harmState.assign (maxPeaksInternal, HarmState {});
+    prevHarmState.assign (maxPeaksInternal, HarmState {});
     prevPeakTrueHz.assign (maxPeaksInternal, 0.0f);
     prevTonalAge.assign (maxPeaksInternal, 0);
     peakTonalAge.assign (maxPeaksInternal, 0);
@@ -133,6 +136,8 @@ void SpectralEngine::reset() noexcept
     std::fill (prevPhase.begin(), prevPhase.end(), 0.0f);
     std::fill (prevOwner.begin(), prevOwner.end(), -1);
     std::fill (prevTheta.begin(), prevTheta.end(), 0.0f);
+    for (auto& h : harmState) h.valid = false;
+    for (auto& h : prevHarmState) h.valid = false;
     std::fill (prevTonalAge.begin(), prevTonalAge.end(), 0);
     std::fill (prevMagnitude.begin(), prevMagnitude.end(), 0.0f);
     prevNumPeaks = 0;
@@ -316,6 +321,9 @@ void SpectralEngine::processFrame() noexcept
     // (pics instables ou qui viennent d'apparaître) passent sans décalage et
     // avec leur phase d'origine : les transitoires restent intacts.
     const float onsetRatio = 2.0f;                         // +6 dB d'une trame à l'autre = attaque
+    // Tolérance de stabilité en Hz, indépendante de la taille de fenêtre (≈ celle
+    // de la 1.4) : une fenêtre plus courte ne rend pas le suivi plus laxiste.
+    const float stableToleranceHz = juce::jmin (binHz, 11.0f);
     for (int p = 0; p < numPeaks; ++p)
     {
         const int k = peakBin[(size_t) p];
@@ -326,12 +334,13 @@ void SpectralEngine::processFrame() noexcept
         const bool hasAncestor = ancestor >= 0 && ancestor < prevNumPeaks;
 
         const bool stable = hasAncestor
-                         && std::abs (trueHz - prevPeakTrueHz[(size_t) ancestor]) < binHz
+                         && std::abs (trueHz - prevPeakTrueHz[(size_t) ancestor]) < stableToleranceHz
                          && std::abs (trueBin[(size_t) k] - (float) k) < 1.5f;
         const bool onset  = magnitude[(size_t) k] > onsetRatio * prevMagnitude[(size_t) k];
 
         const int age = (stable && ! onset) ? juce::jmin (1000, prevTonalAge[(size_t) ancestor] + 1) : 0;
         peakTonalAge[(size_t) p] = age;
+        peakAncestor[(size_t) p] = (age >= 1) ? ancestor : -1;
 
         const float target = (age >= 1) ? targetFrequencyFor (trueHz) : trueHz;
 
@@ -358,6 +367,10 @@ void SpectralEngine::processFrame() noexcept
     }
     prevNumPeaks = numPeaks;
     std::copy (magnitude.begin(), magnitude.end(), prevMagnitude.begin());
+
+    // L'état des harmoniques de la trame précédente devient « précédent ».
+    std::swap (harmState, prevHarmState);
+    for (auto& h : harmState) h.valid = false;
 
     // ---- 6. Déplacement des régions (même opération sur chaque canal) --------
     for (int c = 0; c < nch; ++c)
@@ -436,12 +449,12 @@ void SpectralEngine::setColour (float c) noexcept
 void SpectralEngine::computeCombCurve (uint16_t mask, std::vector<float>& curveDb) const noexcept
 {
     // Courbe en dB, par bin, pour une profondeur de 100 % :
-    //   +5.5 dB sur les notes de la gamme (pics étroits, ~15 cents),
-    //   −8 dB entre elles (un peu plus marqué que Chroma, à la demande), actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
+    //   +6.5 dB sur les notes de la gamme (pics étroits, ~15 cents),
+    //   −9.5 dB entre elles (la 1.4 poussée un cran plus loin, à la demande), actif de ~250 Hz à ~12 kHz (pleine action 700 Hz–6 kHz),
     //   puis niveau global compensé.
     // Calé en comparant fr(a)me et Chroma sur le même extrait (démo vidéo) :
     // écart moyen par note ≈ 1.5 dB entre 600 Hz et 4 kHz, niveau identique.
-    constexpr float peakDb = 5.5f, floorDb = -8.0f, sigmaCents = 15.0f;
+    constexpr float peakDb = 6.5f, floorDb = -9.5f, sigmaCents = 15.0f;
 
     for (int k = 0; k < numBins; ++k)
     {
@@ -563,7 +576,8 @@ void SpectralEngine::addHarmonics (int nch) noexcept
                        [this] (int a, int b) { return magnitude[(size_t) peakBin[(size_t) a]] > magnitude[(size_t) peakBin[(size_t) b]]; });
 
     struct Rank { int mult; float gain; };
-    const Rank ranks[3] = { { 2, 0.42f }, { 3, 0.26f }, { 4, 0.17f } };
+    const Rank ranks[numHarmRanks] = { { 2, 0.48f }, { 3, 0.30f }, { 4, 0.20f } };
+    const float hopSeconds = (float) hopSize / (float) sampleRate;
 
     for (int i = 0; i < used; ++i)
     {
@@ -580,23 +594,39 @@ void SpectralEngine::addHarmonics (int nch) noexcept
             continue;
 
         const int note = (int) std::lround (frame::hzToMidi (f0));
+        const int anc = peakAncestor[(size_t) p];
+        const HarmState* prev = (anc >= 0 && anc < maxPeaksInternal && prevHarmState[(size_t) anc].valid)
+                                  ? &prevHarmState[(size_t) anc] : nullptr;
+        HarmState& st = harmState[(size_t) p];
+        st.valid = true;
 
-        for (const auto& r : ranks)
+        for (int r = 0; r < numHarmRanks; ++r)
         {
-            const float fh = f0 * (float) r.mult;
-            if (fh > maxHz)
-                break;
-            if (r.mult == 3 && ! frame::maskContains (currentMask, note + 19))
-                continue;                                     // douzième hors gamme : on la saute
+            const float fh = f0 * (float) ranks[r].mult;
+            const bool skipTwelfth = (ranks[r].mult == 3 && ! frame::maskContains (currentMask, note + 19));
 
             for (int c = 0; c < nch; ++c)
             {
-                // Amplitude et phase du partiel dans CE canal (lues sur le bin le plus proche).
+                // Amplitude et phase du partiel dans CE canal (bin le plus proche).
                 const Complex zp = spectrumOut[(size_t) c][(size_t) kc];
-                const float amp = 2.0f * std::abs (zp) / ((float) fftSize * w);
-                const float phi = std::arg (zp) + pi * d;
-                addSinusoid (spectrumOut[(size_t) c], fh / binHz, amp * r.gain * colour,
-                             wrapPhase (phi * (float) r.mult));
+                const float ampNow = 2.0f * std::abs (zp) / ((float) fftSize * w);
+                const float phiNow = wrapPhase ((std::arg (zp) + pi * d) * (float) ranks[r].mult);
+
+                // Phase CONTINUE : prolongée depuis la trame précédente quand le
+                // partiel est suivi (aucun saut d'une trame à l'autre = aucun
+                // grésillement) ; sinon calée sur la phase mesurée × rang.
+                // Amplitude lissée sur ~2 trames (pas de vibration d'amplitude).
+                float ph = phiNow, amp = ampNow;
+                if (prev != nullptr)
+                {
+                    ph = wrapPhase (prev->phase[r][c] + twoPi * fh * hopSeconds);
+                    amp   = 0.5f * (prev->amp[r][c] + ampNow);
+                }
+                st.phase[r][c] = ph;
+                st.amp[r][c]   = amp;
+
+                if (fh <= maxHz && ! skipTwelfth)
+                    addSinusoid (spectrumOut[(size_t) c], fh / binHz, amp * ranks[r].gain * colour, ph);
             }
         }
     }

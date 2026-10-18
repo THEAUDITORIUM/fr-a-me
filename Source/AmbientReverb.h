@@ -8,11 +8,12 @@
         longueurs premières, modulation lente des longueurs (chorus : queue
         vivante, pas métallique), amortissement des aigus dans la boucle,
         diffusion d'entrée par 4 passe-tout, pré-délai.
-      • Nuage granulaire « dans la reverb » : des grains (80–350 ms, fenêtre de
-        Hann, position et panoramique aléatoires) sont prélevés dans la queue,
-        joués à l'unisson, une octave au-dessus ou en dessous (toujours dans la
-        gamme), puis RÉINJECTÉS dans la réverbe : ils s'y fondent au lieu de
-        sonner comme un effet à part.
+      • Nuage de particules ambiantes « dans la reverb » : des grains prélevés
+        dans la queue (longs 120–420 ms, ou courts 30–90 ms pour les éclats),
+        joués à l'unisson, une ou deux octaves au-dessus, ou une octave en
+        dessous (toujours dans la gamme), placés au hasard dans l'espace
+        stéréo, en partie entendus directement et en partie RÉINJECTÉS dans la
+        réverbe, où ils se fondent et se multiplient (scintillement).
       • Placée AVANT le moteur spectral sur le chemin traité : toute la queue
         (grains compris) passe ensuite par le recalage, les harmoniques et le
         peigne COLOR → une réverbe entièrement dans la tonalité.
@@ -42,7 +43,7 @@ public:
 private:
     static constexpr int numLines = 8;
     static constexpr int numDiffusers = 4;
-    static constexpr int maxGrains = 32;
+    static constexpr int maxGrains = 48;
 
     struct DelayLine
     {
@@ -86,7 +87,7 @@ private:
     {
         bool active = false;
         float readPos = 0.0f;       // position dans le tampon du nuage (échantillons)
-        float rate = 1.0f;          // 0.5, 1 ou 2 : octaves, toujours dans la gamme
+        float rate = 1.0f;          // 0.5, 1, 2 ou 4 : octaves, toujours dans la gamme
         int age = 0, length = 1;
         float gainL = 0.7f, gainR = 0.7f;
     };
@@ -97,6 +98,7 @@ private:
     std::array<DelayLine, numLines> lines;
     std::array<float, numLines> baseDelay {}, lfoPhase {}, lfoRate {}, lowpassState {};
     std::array<Allpass, numDiffusers> diffuserL, diffuserR;
+    std::array<Allpass, 3> cloudDiffL, cloudDiffR;      // diffusion propre aux particules
     DelayLine preDelayL, preDelayR;
 
     // Nuage granulaire : tampon circulaire stéréo de la queue (2.5 s).
@@ -107,5 +109,7 @@ private:
     float grainFeedL = 0.0f, grainFeedR = 0.0f;   // grains réinjectés (échantillon précédent)
 
     float amountSmoothed = 0.0f;
+    float inputEnv = 0.0f, grainEnv = 0.0f, feedLimiter = 1.0f, envAttack = 0.01f;   // réinjection bornée
+    float cloudLpL[2] {}, cloudLpR[2] {}, fLpL[2] {}, fLpR[2] {}, cloudLpCoef = 0.5f;  // anti-repliement des particules
     uint32_t rng = 0x9E3779B9u;
 };
