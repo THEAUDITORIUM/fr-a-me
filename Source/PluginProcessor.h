@@ -13,6 +13,8 @@
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
 #include "PitchShifter.h"
+#include "PartialSnapper.h"
+#include "KeyDetector.h"
 #include "ProEq.h"
 #include "LockFreeQueue.h"
 
@@ -43,9 +45,6 @@ class FrameAudioProcessor final : public juce::AudioProcessor
 public:
     FrameAudioProcessor();
 
-    /** Thème de l'interface (« garden » par défaut, ou « floral »), sauvegardé avec le projet. */
-    juce::String getTheme() const;
-    void setTheme (const juce::String& theme);
     ~FrameAudioProcessor() override = default;
 
     //==============================================================================
@@ -88,6 +87,13 @@ public:
     /** Masque de la gamme courante (lu par l'UI pour le surlignage). */
     uint16_t getCurrentScaleMask() const noexcept;
 
+    /** SCAN : détection de tonalité (lancée et lue par l'interface). */
+    KeyDetector& getKeyDetector() noexcept { return keyDetector; }
+    void applyDetectedKey (int tonic, int mode);
+    /** Page d'accueil (scan) déjà passée pour cette instance (sauvegardé avec le projet). */
+    bool isIntroDone() const;
+    void setIntroDone (bool);
+
     /** Réglages courants de l'EQ (lus aussi par l'interface pour la courbe). */
     ProEq::Settings getEqSettings() const noexcept;
     int getLatencyInSamples() const noexcept { return 0; }                       // aucun retard
@@ -110,6 +116,8 @@ private:
 
     SpectralEngine engine;                // analyse pour l'affichage (ne touche pas au son)
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
+    KeyDetector keyDetector;              // SCAN : tonalité de la mélodie jouée
+    PartialSnapper snapper;               // recalage des partiels tenus sur la gamme (0 latence)
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
     PitchShifter pitcher;                 // PITCH −12…+12 (elastic), en fin de chaîne
     ProEq proEq;                          // EQ façon Pro-Q (partie spectrum), juste avant le limiteur

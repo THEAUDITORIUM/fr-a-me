@@ -134,6 +134,9 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
+    snapper.prepare (sampleRate);                      // recalage des partiels : 0 latence
+    snapper.setScale (getCurrentScaleMask());
+    snapper.reset();
     harmonizer.prepare (sampleRate);                   // traitement harmonique : 0 latence
     harmonizer.setScale (getCurrentScaleMask());
     harmonizer.reset();
@@ -152,6 +155,7 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
     preHarmoBuffer.setSize (2, maxChunk, false, true, false);
     pitcher.prepare (sampleRate);
+    keyDetector.prepare (sampleRate);                  // SCAN : analyse de l'entrée (seulement pendant un scan)
     proEq.prepare (sampleRate);
     outBuffer.setSize (2, maxChunk, false, true, false);
 
@@ -237,6 +241,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         engine.reset();
         harmonizer.reset();
+        snapper.reset();
         pitcher.reset();
         proEq.reset();
         reverb.reset();
@@ -246,8 +251,12 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         engineNeedsReset = false;
     }
 
+    // SCAN : le son d'entrée (avant tout traitement) est analysé pendant un scan.
+    keyDetector.push (buffer.getReadPointer (0), numChannels > 1 ? buffer.getReadPointer (1) : nullptr, buffer.getNumSamples());
+
     engine.setScaleMask (getCurrentScaleMask());       // (affichage)
     harmonizer.setScale (getCurrentScaleMask());       // gains glissés si la gamme change
+    snapper.setScale (getCurrentScaleMask());          // fondu croisé si la gamme change
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
     harmoSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (harmoParam->load()) * 0.01f));
 
@@ -288,6 +297,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
     for (int c = 0; c < numChannels; ++c)                    // (copie pour le dosage HARMO)
         preHarmoBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
+    snapper.process (wetView, numChannels, 1.0f);            // 3a. partiels tenus recalés sur la gamme
     harmonizer.process (wetView, numChannels, 1.0f);         // 3. peigne + harmoniques justes (0 latence)
 
     // HARMO : dosage du traitement harmonique seul (100 % = son de la 2.0.0).
@@ -424,20 +434,35 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
 }
 
 //==============================================================================
-juce::String FrameAudioProcessor::getTheme() const
+bool FrameAudioProcessor::isIntroDone() const
 {
-    // Thème par défaut : garden. « sun » / « light » (anciennes sessions)
-    // deviennent floral ; l'ancien « dark » (retiré) devient garden.
-    const auto t = apvts.state.getProperty ("theme", "garden").toString();
-    return (t == "floral" || t == "sun" || t == "light") ? juce::String ("floral") : juce::String ("garden");
+    return (bool) apvts.state.getProperty ("introDone", false);
 }
 
-void FrameAudioProcessor::setTheme (const juce::String& theme)
+void FrameAudioProcessor::setIntroDone (bool d)
 {
-    apvts.state.setProperty ("theme", theme, nullptr);
+    apvts.state.setProperty ("introDone", d, nullptr);
 }
 
-//==============================================================================
+void FrameAudioProcessor::applyDetectedKey (int tonic, int mode)
+{
+    // Fil interface : tonique et mode réglés comme si on cliquait (geste complet,
+    // l'hôte enregistre le changement et l'automation reste cohérente).
+    if (tonic < 0 || tonic > 11) return;
+    if (auto* p = apvts.getParameter (ParamIDs::note))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) tonic));
+        p->endChangeGesture();
+    }
+    if (auto* p = apvts.getParameter (ParamIDs::mode))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) (mode == 1 ? 1 : 0)));
+        p->endChangeGesture();
+    }
+}
+
 juce::AudioProcessorEditor* FrameAudioProcessor::createEditor()
 {
     return new FrameAudioProcessorEditor (*this);

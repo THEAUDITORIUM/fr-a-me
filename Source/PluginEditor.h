@@ -15,6 +15,7 @@
 #include "FrameLookAndFeel.h"
 #include "Visualisers.h"
 #include "Controls.h"
+#include "ScanPage.h"
 
 /** Le contenu à taille fixe (coordonnées de conception). */
 class FrameCanvas final : public juce::Component
@@ -31,12 +32,6 @@ public:
     /** Appelé par le timer de l'éditeur : vide les FIFO et rafraîchit. */
     void refresh();
 
-    void mouseUp (const juce::MouseEvent&) override;
-    void mouseMove (const juce::MouseEvent&) override;
-
-    /** Applique un thème (palette, spectrogramme, look-and-feel, sauvegarde). */
-    void applyTheme (Theme t);
-    std::function<void()> onThemeChanged;
 
 private:
     void drawTimeAxis (juce::Graphics&, juce::Rectangle<float> span);
@@ -55,6 +50,8 @@ private:
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
                     const char* paramID);
     ModeToggle modeToggle;
+    ScanButton scanButton;
+    ScanPage scanPage;                    // page d'accueil « scan » (par-dessus la planche)
     NoteRow noteRow;
 
     uint16_t shownMask = 0;
@@ -65,16 +62,13 @@ private:
     const juce::Rectangle<float> spectrumArea { 80.0f, 310.0f, 840.0f, 140.0f };
     const juce::Rectangle<float> partialArea  { 80.0f, 476.0f, 840.0f, 100.0f };
     const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };   // petit bouton gain, en haut à droite
-    const juce::Rectangle<int>   pitchArea    { 812, 12, 40, 40 };   // petit bouton pitch, à côté de gain
-    juce::Rectangle<float> themeIconArea (Theme t) const
-    {
-        const float slot = (t == Theme::garden) ? 0.0f : 1.0f;              // garden (défaut) à gauche, floral à droite
-        return { 702.0f + 36.0f * slot, 20.0f, 24.0f, 24.0f };
-    }
-    const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
-    const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
-    const juce::Rectangle<int>   modeArea     { 430, 656, 170, 36 };
-    const juce::Rectangle<int>   noteArea     { 630, 648, 290, 50 };
+    // Rangée du bas : trois gros boutons (harmo, reverb, pitch), mode + scan, tonique.
+    const juce::Rectangle<int>   knobArea     { 110, 630, 92, 92 };
+    const juce::Rectangle<int>   reverbArea   { 240, 630, 92, 92 };
+    const juce::Rectangle<int>   pitchArea    { 370, 630, 92, 92 };
+    const juce::Rectangle<int>   modeArea     { 498, 650, 150, 36 };
+    const juce::Rectangle<int>   scanArea     { 511, 698, 124, 24 };
+    const juce::Rectangle<int>   noteArea     { 672, 648, 248, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };

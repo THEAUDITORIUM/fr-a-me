@@ -15,6 +15,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <memory>
+#include <functional>
 #include <array>
 
 class ModeToggle final : public juce::Component
@@ -57,6 +58,20 @@ private:
     uint16_t mask = 0;
     bool dragging = false;
     std::unique_ptr<juce::ParameterAttachment> attachment;
+};
+
+/** Petit bouton « scan key » de la planche : rouvre la page de scan. */
+class ScanButton final : public juce::Component
+{
+public:
+    ScanButton();
+    std::function<void()> onClick;
+    void paint (juce::Graphics&) override;
+    void mouseEnter (const juce::MouseEvent&) override { hover = true;  repaint(); }
+    void mouseExit (const juce::MouseEvent&) override  { hover = false; repaint(); }
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    bool hover = false;
 };
 
 /** EQ façon Pro-Q, dans la partie spectrum : fréquences de gauche à droite

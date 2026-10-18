@@ -48,7 +48,7 @@ juce::Font FrameLookAndFeel::mono (float height, bool regularWeight, float track
 }
 
 void FrameLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
-                                         float pos, float startAngle, float endAngle, juce::Slider&)
+                                         float pos, float startAngle, float endAngle, juce::Slider& slider)
 {
     // Potentiomètre minimaliste : cercle au trait fin, graduations d'instrument,
     // arc et index jaunes.
@@ -68,9 +68,13 @@ void FrameLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wi
                     c.x + r1 * std::sin (a), c.y - r1 * std::cos (a), major ? 0.9f : 0.6f);
     }
 
-    // Arc de valeur (jaune, sous le trait noir).
+    // Arc de valeur (accent, sous le trait). Bouton bipolaire (pitch) : l'arc
+    // part du zéro, au centre.
     juce::Path arc;
-    arc.addCentredArc (c.x, c.y, radius - 3.0f, radius - 3.0f, 0.0f, startAngle, angle, true);
+    float arcStart = startAngle;
+    if (slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0)
+        arcStart = startAngle + (float) slider.valueToProportionOfLength (0.0) * (endAngle - startAngle);
+    arc.addCentredArc (c.x, c.y, radius - 3.0f, radius - 3.0f, 0.0f, juce::jmin (arcStart, angle), juce::jmax (arcStart, angle), true);
     g.setColour (Palette::accent);
     g.strokePath (arc, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
 
@@ -118,48 +122,6 @@ void drawCallout (juce::Graphics& g, const juce::String& label, juce::Point<floa
 }
 
 //==============================================================================
-void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> r, bool selected)
-{
-    const auto c = r.getCentre();
-    const float s = juce::jmin (r.getWidth(), r.getHeight());
-
-    if (selected)
-    {
-        g.setColour (Palette::accent);
-        g.fillEllipse (r.withSizeKeepingCentre (s, s));
-    }
-    g.setColour (selected ? Palette::onAccent : Palette::graphite);
-    const float lw = 1.0f;
-
-    switch (t)
-    {
-        case Theme::floral:     // fleur : 5 pétales au trait + cœur
-        {
-            const float pr = s * 0.14f, dist = s * 0.17f;
-            for (int i = 0; i < 5; ++i)
-            {
-                const float a = juce::MathConstants<float>::twoPi * (float) i / 5.0f - juce::MathConstants<float>::halfPi;
-                juce::Path petal;
-                petal.addEllipse (-pr * 0.75f, -pr * 1.15f, pr * 1.5f, pr * 2.3f);
-                g.strokePath (petal, juce::PathStrokeType (lw * 0.9f),
-                              juce::AffineTransform::rotation (a + juce::MathConstants<float>::halfPi)
-                                  .translated (c.x + std::cos (a) * dist, c.y + std::sin (a) * dist));
-            }
-            g.fillEllipse (c.x - s * 0.06f, c.y - s * 0.06f, s * 0.12f, s * 0.12f);
-            break;
-        }
-        case Theme::garden:     // petit arbre : tronc + feuillage au trait
-        {
-            g.drawLine (c.x, c.y + s * 0.36f, c.x, c.y - s * 0.02f, lw);
-            g.drawLine (c.x, c.y + s * 0.12f, c.x - s * 0.12f, c.y + s * 0.02f, lw * 0.8f);
-            g.drawLine (c.x, c.y + s * 0.06f, c.x + s * 0.13f, c.y - s * 0.04f, lw * 0.8f);
-            g.drawEllipse (c.x - s * 0.24f, c.y - s * 0.38f, s * 0.48f, s * 0.40f, lw);
-            g.drawEllipse (c.x - s * 0.08f, c.y - s * 0.26f, s * 0.16f, s * 0.14f, lw * 0.7f);
-            break;
-        }
-    }
-}
-
 namespace
 {
     // Papier déchiré : rectangle aux bords irréguliers.
@@ -267,68 +229,4 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
     leaf (215.0f, 25.0f, -0.8f, 8.0f);
     g.setColour (juce::Colour (0xffe8a3b6).withAlpha (0.8f));
     g.fillEllipse (216.0f, 18.5f, 4.5f, 4.5f);
-}
-
-void drawFloralDecor (juce::Graphics& g, juce::Rectangle<float> page)
-{
-    juce::Random rng (0x7e7a15);
-    paperGrain (g, page, rng, juce::Colour (0xffc9a3ad), juce::Colour (0xff8a8572));   // grain neutre : fond blanc
-
-    const juce::Colour roses[] = { juce::Colour (0xffeeb0c0), juce::Colour (0xfff4c9d3), juce::Colour (0xffe59bb0) };
-    const juce::Colour veinInk (0xffcf6a88);
-    int k = 0;
-    for (int bi : decorBlocks)
-    {
-        // Un pétale par emplacement : forme douce, quelques nervures fines.
-        const auto b = collageBlocks[bi];
-        const auto c = b.getCentre();
-        const float len = juce::jmin (b.getHeight() * 0.40f, 44.0f), wid = b.getWidth() * 0.44f;
-        const auto tr = juce::AffineTransform::rotation ((rng.nextFloat() - 0.5f) * 0.7f).translated (c.x, c.y);
-
-        juce::Path petal;
-        petal.startNewSubPath (0.0f, len);
-        petal.cubicTo (-wid * 1.2f, len * 0.4f, -wid * 1.1f, -len * 0.9f, -wid * 0.1f, -len);
-        petal.quadraticTo (0.0f, -len * 0.88f, wid * 0.15f, -len * 1.02f);
-        petal.cubicTo (wid * 1.15f, -len * 0.85f, wid * 1.2f, len * 0.35f, 0.0f, len);
-        petal.closeSubPath();
-
-        g.setColour (roses[k % 3].withAlpha (0.38f));
-        g.fillPath (petal, tr);
-
-        g.saveState();
-        g.reduceClipRegion (petal, tr);
-        g.setColour (veinInk.withAlpha (0.22f));
-        for (int v = 0; v < 5; ++v)
-        {
-            const float t = ((float) v / 4.0f - 0.5f) * 1.4f;
-            juce::Path vein;
-            vein.startNewSubPath (0.0f, len * 0.95f);
-            vein.quadraticTo (t * wid * 0.5f, 0.0f, t * wid * 1.1f, -len);
-            g.strokePath (vein, juce::PathStrokeType (0.45f), tr);
-        }
-        g.restoreState();
-        ++k;
-    }
-
-    // Petite fleur dessinée au crayon, en haut à gauche.
-    const juce::Point<float> fc (206.0f, 36.0f);
-    g.setColour (juce::Colour (0xff8fae6a).withAlpha (0.8f));                 // tige et feuille vert tendre
-    juce::Path stem;
-    stem.startNewSubPath (fc.x - 2.0f, 66.0f);
-    stem.quadraticTo (fc.x - 6.0f, 52.0f, fc.x, fc.y + 6.0f);
-    g.strokePath (stem, juce::PathStrokeType (0.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    juce::Path lf;
-    lf.startNewSubPath (0.0f, 0.0f);
-    lf.quadraticTo (5.0f, -3.5f, 10.0f, 0.0f);
-    lf.quadraticTo (5.0f, 3.5f, 0.0f, 0.0f);
-    g.strokePath (lf, juce::PathStrokeType (0.8f), juce::AffineTransform::rotation (-0.6f).translated (fc.x - 4.0f, 56.0f));
-    g.setColour (juce::Colour (0xffd0708e).withAlpha (0.75f));
-    for (int i = 0; i < 5; ++i)
-    {
-        juce::Path pp;
-        pp.addEllipse (-3.2f, -8.5f, 6.4f, 9.0f);
-        g.strokePath (pp, juce::PathStrokeType (0.85f),
-                      juce::AffineTransform::rotation (juce::MathConstants<float>::twoPi * (float) i / 5.0f).translated (fc.x, fc.y));
-    }
-    g.fillEllipse (fc.x - 1.6f, fc.y - 1.6f, 3.2f, 3.2f);
 }

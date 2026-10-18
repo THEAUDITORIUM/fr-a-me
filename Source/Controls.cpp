@@ -126,7 +126,7 @@ void NoteRow::paint (juce::Graphics& g)
         g.setColour (Palette::ink);
         g.drawRect (r, 0.7f);
 
-        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), 12.0f,
+        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), 11.0f,
                       juce::Justification::centred, active ? Palette::onAccent : Palette::graphite, active, 0.04f);
 
         // Point sous les notes de la gamme courante (jaune pour la tonique).
@@ -174,6 +174,37 @@ void NoteRow::mouseExit (const juce::MouseEvent&)
 {
     hover = -1;
     repaint();
+}
+
+//==============================================================================
+//  ScanButton
+//==============================================================================
+ScanButton::ScanButton()
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTitle ("scan key");
+}
+
+void ScanButton::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (1.0f);
+    const float rr = b.getHeight() * 0.5f;
+    if (hover) { g.setColour (Palette::accent.withAlpha (0.35f)); g.fillRoundedRectangle (b, rr); }
+    g.setColour (Palette::ink);
+    g.drawRoundedRectangle (b, rr, 0.8f);
+    // pictogramme : cercles concentriques (écoute)
+    const juce::Point<float> c (b.getX() + rr + 2.0f, b.getCentreY());
+    g.fillEllipse (c.x - 1.6f, c.y - 1.6f, 3.2f, 3.2f);
+    g.drawEllipse (c.x - 4.5f, c.y - 4.5f, 9.0f, 9.0f, 0.7f);
+    g.setColour (Palette::accentInk);
+    g.drawEllipse (c.x - 7.5f, c.y - 7.5f, 15.0f, 15.0f, 0.7f);
+    drawMonoText (g, "scan key", b.withTrimmedLeft (rr * 2.0f + 2.0f), 11.0f, juce::Justification::centredLeft, Palette::ink);
+}
+
+void ScanButton::mouseUp (const juce::MouseEvent& e)
+{
+    if (getLocalBounds().contains (e.getPosition()) && onClick)
+        onClick();
 }
 
 //==============================================================================

@@ -4,12 +4,17 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **harmo** (0–100 %, dose l'harmonie), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ façon Pro-Q** dans la partie spectrum (coupe basse, 3 cloches, coupe haute ; fréquences de gauche à droite), **thèmes** garden (par défaut, prairie) / floral (rose pétale), **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **scan** (page d'accueil : on joue la mélodie, fr(a)me trouve la tonalité et
+règle tonique + mode), **harmo** (0–100 %, recalage des notes tenues + peigne + harmoniques),
+**reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12
+demi-tons, elastic), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
+dans la partie spectrum (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
+(−24 … +12 dB, petit bouton en haut à droite). Thème unique : garden.
 Tous automatisables et sauvegardés avec le projet.
 
-| garden (par défaut) | floral |
+| page de scan (au lancement) | la planche |
 |---|---|
-| ![garden](docs/interface_garden.png) | ![floral](docs/interface_floral.png) |
+| ![scan](docs/interface_scan.png) | ![planche](docs/interface.png) |
 
 ## Télécharger
 
@@ -159,13 +164,15 @@ frame/
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
 │   ├── ProEq.*               EQ façon Pro-Q : coupes 24 dB/oct + 3 cloches (0 latence)
 │   ├── PitchShifter.*        PITCH : transposition elastic (SOLA)
+│   ├── PartialSnapper.*      recalage des partiels tenus sur la gamme (0 latence)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
-│   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
+│   ├── KeyDetector.*         SCAN : détection de la tonalité de l'entrée
+│   ├── ScanPage.*            page d'accueil « scan »
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
 │   ├── Visualisers.*         bandes input / output / spectrum / partials
-│   ├── Controls.*            bascule major/minor, rangée des 12 notes, EQ façon Pro-Q (EqView)
+│   ├── Controls.*            bascule major/minor, bouton « scan key », rangée des 12 notes, EQ façon Pro-Q (EqView)
 │   └── FrameLookAndFeel.*    palette, typographie, potentiomètre
 ├── Resources/fonts/          IBM Plex Mono (licence SIL OFL, voir OFL.txt)
 └── tests/                    banc de test du moteur, capture de l'interface
@@ -174,6 +181,39 @@ frame/
 ---
 
 ## 4. Le traitement en détail
+
+**3.0 — l'harmonie sur les sons longs.** Toute la chaîne reste à **0 latence** (vérifié à
+l'échantillon près sur un train de clics, avec et sans reverb, harmo à 0 ou 100 %).
+
+- *Recalage des partiels tenus* (`PartialSnapper`) : pour chaque note de la gamme, une bande
+  analytique mesure la fréquence réelle de ce qui y sonne. Si c'est un partiel tonal (sa
+  phase reste cohérente sur 8 ms, contrairement à un bruit) qui appartient bien à cette
+  bande, il est **remplacé par lui-même déplacé exactement sur la note** : les notes fausses
+  ou « entre deux » deviennent des notes de la gamme au lieu d'être seulement atténuées. Les
+  notes justes ne sont pas touchées (zone morte de ±6 cents), les bruits et les attaques
+  passent tels quels. Mesuré : 455 Hz → 440.02 Hz (résidu −44 dB).
+- *Peigne* : cloches à +27 dB plus larges (elles sonnent moins longtemps : plus de « lignes »
+  qui traînent sur les sons tenus), compensation **statique** par octave calculée à partir de
+  la réponse du peigne (les notes de la gamme ressortent au niveau d'origine) — l'ancienne
+  régulation en boucle fermée faisait pomper le niveau sur les sons longs (jusqu'à ±13 dB) et
+  déséquilibrait les graves ; elle est remplacée. Rattrapage très lent, limité à +6 dB, pour
+  les sons non tonals (cymbales, bruits).
+- *Harmoniques justes* poussées au maximum : octave ≈ −7 dB, douzième ≈ −11 dB, double
+  octave ≈ −14 dB sous la note.
+
+Mesures (partiels sur les notes de la gamme / entre deux notes) : extrait de la vidéo Chroma
+en la majeur — Chroma 94 % / 4 %, fr(a)me 2.4 90 % / 0.4 % mais 9 % hors gamme, **fr(a)me
+3.0 98 % / 2 %, 0.3 % hors gamme** ; mélodie « vocodex » en ré mineur 37 % → 95 % ; scie
+tenue désaccordée de +39 cents 1 % → 99 % ; glissando 32 % → 100 % ; vibrato et accords
+désaccordés recalés, niveau conservé à ±1 dB, plus de pompage. Traînées entre les accords
+divisées par plus de deux (+6 dB au lieu de +10 dB).
+
+**SCAN** (`KeyDetector`) : pendant un scan, l'entrée est analysée par FFT (8192 points) ;
+les pics (70 Hz – 5 kHz) donnent un profil des 12 notes. On choisit d'abord la **gamme**
+(les 7 notes qui contiennent le plus d'énergie — c'est ce qui compte pour le son), puis la
+**tonique** dans cette gamme (majeur ou relatif mineur, par la basse et les profils
+d'Albrecht & Shanahan). Le scan s'arrête après ~6 s de son joué (les silences ne comptent
+pas). Testé sur des progressions dans 22 tonalités : la bonne gamme à chaque fois.
 
 **Analyse.** STFT à fenêtre de Hann, N = 4096 points à 44.1/48 kHz (8192 à 88.2/96 kHz,
 16384 au-delà, pour garder ~11 Hz de résolution), recouvrement 75 % (hop = N/4).
@@ -257,12 +297,8 @@ la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi p
 (type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
 saut de phase. À 0, contourné : son strictement inchangé.
 
-**Thèmes** (en haut à droite), volontairement sobres — le blanc domine, le rose et le vert
-dosés par touches : petit arbre = **garden**, le thème au lancement (verts d'herbe, trois
-aplats d'herbe couchée dans les marges avec quelques fleurs roses, brin au crayon au bouton
-rose) ; fleur = **floral** (même fond blanc que garden, rose pétale : encre prune, trois pétales veinés dans les marges,
-petite fleur rose à la tige verte). Icônes : garden à gauche, floral à droite. Le thème est sauvegardé avec le projet (les projets en
-« sun » s'ouvrent en floral).
+**Thème** : un seul, garden — fond blanc, encre de mousse, vert d'herbe, quelques touches de
+rose ; trois aplats d'herbe couchée dans les marges et un brin au crayon.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
@@ -318,14 +354,20 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
 (720 px de large par défaut ; redimensionnez par le coin inférieur droit, de 520 à 1500 px).
 
 - **input** : forme d'onde noire du signal entrant ;
-- **output** : forme d'onde jaune du signal traité ;
-- **spectrum** : spectrogramme défilant à l'encre, grain d'impression ; les lignes des
-  fréquences de la gamme sont teintées, l'énergie qui tombe dessus s'imprime en jaune ;
-  à gauche, la tonique de chaque octave ;
+- **output** : forme d'onde verte du signal traité ;
+- **spectrum** : EQ façon Pro-Q (fréquences de gauche à droite) sur l'analyseur du son de
+  sortie, avec la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **harmo** (double-clic = 100 %), **reverb** (double-clic = 30 %), **pitch** (double-clic = 0), **gain** (double-clic = 0 dB), **mode** (clic sur le mot), **tonic** (clic ou glisser
-  le long de la rangée ; un point marque chaque note de la gamme).
+- en bas, trois gros boutons : **harmo** (double-clic = 100 %), **reverb** (double-clic =
+  30 %), **pitch** (double-clic = 0) ; **mode** (clic sur le mot) et le bouton **scan key**
+  (rouvre la page de scan) ; **tonic** (clic ou glisser le long de la rangée ; un point
+  marque chaque note de la gamme) ;
+- en haut à droite : **gain** (double-clic = 0 dB).
+
+À l'ouverture d'une nouvelle instance, la **page de scan** s'affiche : gros bouton « scan »,
+on joue la mélodie dans le DAW, la tonalité est trouvée et appliquée, puis la planche
+s'ouvre (« skip » pour entrer directement).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).
 

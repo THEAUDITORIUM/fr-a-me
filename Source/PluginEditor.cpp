@@ -14,10 +14,9 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
       eqView     (p.apvts),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
+      scanPage   (p),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
 {
-    Palette::apply (Palette::fromName (p.getTheme()));
-
     addAndMakeVisible (inputBand);
     addAndMakeVisible (outputBand);
     addAndMakeVisible (eqView);
@@ -32,6 +31,14 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
 
     addAndMakeVisible (modeToggle);
     addAndMakeVisible (noteRow);
+    addAndMakeVisible (scanButton);
+    scanButton.onClick = [this] { scanPage.open(); };
+
+    // Page de scan : à l'ouverture d'une nouvelle instance (pas encore passée).
+    addChildComponent (scanPage);
+    scanPage.onClose = [this] { repaint(); };
+    if (! processor.isIntroDone())
+        scanPage.open();
 
     setSize (designWidth, designHeight);
     refresh();
@@ -64,39 +71,15 @@ void FrameCanvas::resized()
     reverbKnob.setBounds (reverbArea);
     gainKnob.setBounds   (gainArea);
     modeToggle.setBounds (modeArea);
+    scanButton.setBounds (scanArea);
     noteRow.setBounds   (noteArea);
-}
-
-void FrameCanvas::applyTheme (Theme t)
-{
-    Palette::apply (t);
-    processor.setTheme (Palette::toName (t));
-    if (onThemeChanged) onThemeChanged();
-    repaint();
-    for (auto* child : getChildren())
-        child->repaint();
-}
-
-void FrameCanvas::mouseUp (const juce::MouseEvent& e)
-{
-    for (auto t : { Theme::garden, Theme::floral })
-        if (themeIconArea (t).expanded (3.0f).contains (e.position) && t != Palette::current)
-        {
-            applyTheme (t);
-            return;
-        }
-}
-
-void FrameCanvas::mouseMove (const juce::MouseEvent& e)
-{
-    bool over = false;
-    for (auto t : { Theme::garden, Theme::floral })
-        over = over || themeIconArea (t).expanded (3.0f).contains (e.position);
-    setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    scanPage.setBounds  (getLocalBounds());
 }
 
 void FrameCanvas::refresh()
 {
+    scanPage.update();
+
     // 1. Formes d'onde
     WaveSlice slice;
     int guard = 0;
@@ -137,10 +120,7 @@ void FrameCanvas::paint (juce::Graphics& g)
 {
     using J = juce::Justification;
     g.fillAll (Palette::paper);
-    if (Palette::current == Theme::garden)
-        drawGardenDecor (g, getLocalBounds().toFloat());
-    else
-        drawFloralDecor (g, getLocalBounds().toFloat());
+    drawGardenDecor (g, getLocalBounds().toFloat());
 
     const float left = inputArea.getX(), right = inputArea.getRight();
 
@@ -148,17 +128,8 @@ void FrameCanvas::paint (juce::Graphics& g)
     drawMonoText (g, "fr(a)me", { 0.0f, 16.0f, (float) designWidth, 34.0f }, 28.0f, J::centred, Palette::ink, true, 0.28f);
     drawMonoText (g, "( spectral harmoniser )", { 0.0f, 50.0f, (float) designWidth, 16.0f }, 11.0f, J::centred, Palette::graphite);
     drawMonoText (g, "plate 01", { left, 22.0f, 200.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil);
-    // Thèmes : petit arbre (garden, défaut) à gauche, fleur (floral) à droite.
-    for (auto t : { Theme::garden, Theme::floral })
-        drawThemeIcon (g, t, themeIconArea (t), t == Palette::current);
-    drawMonoText (g, Palette::toName (Palette::current), { 684.0f, 46.0f, 96.0f, 12.0f }, 8.5f, J::centred, Palette::graphite);
-
-    // Petits boutons pitch et gain (en haut à droite) : nom et valeur dessous.
+    // Petit bouton gain (en haut à droite) : nom et valeur dessous.
     {
-        const auto pr = pitchArea.toFloat();
-        const int st = juce::roundToInt (pitchKnob.getValue());
-        drawMonoText (g, "pitch " + juce::String (st > 0 ? "+" : "") + juce::String (st) + " st",
-                      { pr.getCentreX() - 45.0f, pr.getBottom() + 2.0f, 90.0f, 12.0f }, 8.5f, J::centred, Palette::ink);
         const auto gr = gainArea.toFloat();
         const float gv = (float) gainKnob.getValue();
         drawMonoText (g, "gain " + juce::String (gv > 0.05f ? "+" : "") + juce::String (gv, 1) + " db",
@@ -230,20 +201,24 @@ void FrameCanvas::paint (juce::Graphics& g)
 
     const auto knobC = knobArea.toFloat().getCentre();
     const auto reverbC = reverbArea.toFloat().getCentre();
-    drawCallout (g, "harmo", { left, 616.0f }, { knobC.x, (float) knobArea.getY() + 2.0f }, true);
-    drawCallout (g, "reverb", { 236.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
-    drawCallout (g, "mode", { 420.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
-    drawCallout (g, "tonic", { 630.0f, 616.0f },
+    const auto pitchC = pitchArea.toFloat().getCentre();
+    drawCallout (g, "harmo",  { left, 616.0f },   { knobC.x,   (float) knobArea.getY() + 2.0f }, true);
+    drawCallout (g, "reverb", { 210.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
+    drawCallout (g, "pitch",  { 340.0f, 616.0f }, { pitchC.x,  (float) pitchArea.getY() + 2.0f }, true);
+    drawCallout (g, "mode",   { 488.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
+    drawCallout (g, "tonic",  { 672.0f, 616.0f },
                  { (float) noteArea.getX() + noteArea.getWidth() * ((float) noteRow.getNote() + 0.5f) / 12.0f,
                    (float) noteArea.getY() - 2.0f }, true);
 
-    // Valeur du MIX sous le potentiomètre
-    const auto mixText = juce::String (juce::roundToInt (harmoKnob.getValue())) + " %";
-    drawMonoText (g, mixText, { knobC.x - 55.0f, (float) knobArea.getBottom() + 2.0f, 110.0f, 16.0f },
-                  12.0f, J::centred, Palette::ink, true);
-    drawMonoText (g, juce::String (juce::roundToInt (reverbKnob.getValue())) + " %",
-                  { reverbC.x - 55.0f, (float) reverbArea.getBottom() + 2.0f, 110.0f, 16.0f },
-                  12.0f, J::centred, Palette::ink, true);
+    // Valeurs sous les trois gros boutons.
+    auto value = [&] (const juce::String& t, juce::Point<float> c, const juce::Rectangle<int>& area)
+    {
+        drawMonoText (g, t, { c.x - 55.0f, (float) area.getBottom() + 2.0f, 110.0f, 16.0f }, 12.0f, J::centred, Palette::ink, true);
+    };
+    value (juce::String (juce::roundToInt (harmoKnob.getValue())) + " %", knobC, knobArea);
+    value (juce::String (juce::roundToInt (reverbKnob.getValue())) + " %", reverbC, reverbArea);
+    const int st = juce::roundToInt (pitchKnob.getValue());
+    value ((st > 0 ? "+" : "") + juce::String (st) + " st", pitchC, pitchArea);
 }
 
 void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)
@@ -276,9 +251,7 @@ void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)
 FrameAudioProcessorEditor::FrameAudioProcessorEditor (FrameAudioProcessor& p)
     : AudioProcessorEditor (&p), canvas (p)
 {
-    lookAndFeel.refreshColours();                // thème du projet (appliqué par le canevas)
     setLookAndFeel (&lookAndFeel);
-    canvas.onThemeChanged = [this] { lookAndFeel.refreshColours(); repaint(); };
     addAndMakeVisible (canvas);
 
     // Redimensionnable, proportions de la planche conservées.

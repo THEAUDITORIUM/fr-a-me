@@ -19,6 +19,8 @@
 #include "../Source/AmbientReverb.h"
 #include "../Source/ZeroLatencyHarmonizer.h"
 #include "../Source/ProEq.h"
+#include "../Source/PartialSnapper.h"
+#include "../Source/KeyDetector.h"
 #include "../Source/PitchShifter.h"
 
 #include <cstdio>
@@ -515,8 +517,15 @@ int main (int argc, char** argv)
             h.process (b, 1, 1.0f);
             int peakAt = 0;
             for (int n = 0; n < 4096; ++n) if (std::abs (b.getSample (0, n)) > std::abs (b.getSample (0, peakAt))) peakAt = n;
-            std::printf ("     clic : crête à l'échantillon %d\n", peakAt);
-            check (peakAt == 0, "zéro latence (aucun décalage avec le son d'origine)");
+            // Le son direct sort à l'échantillon 0 (pas de retard) ; les cloches du
+            // peigne résonnent ensuite. Mesure : énergie des 2 premières ms vs une
+            // copie retardée de 1 ms (un retard déplacerait l'énergie).
+            double e0 = 0.0, e1 = 0.0;
+            for (int n = 0; n < (int) (0.001 * sr); ++n) e0 += b.getSample (0, n) * b.getSample (0, n);
+            for (int n = (int) (0.001 * sr); n < (int) (0.002 * sr); ++n) e1 += b.getSample (0, n) * b.getSample (0, n);
+            std::printf ("     clic : 1er échantillon %.3f, crête à l'échantillon %d, énergie 0-1 ms / 1-2 ms = %.1f dB\n",
+                         b.getSample (0, 0), peakAt, 10.0 * std::log10 (e0 / juce::jmax (1.0e-20, e1)));
+            check (std::abs (b.getSample (0, 0)) > 0.2f && e0 > e1, "zéro latence (le son direct sort tout de suite)");
         }
         // b) bruit : contraste notes / entre les notes, niveau conservé
         {
@@ -698,6 +707,127 @@ int main (int argc, char** argv)
         }
     }
 
+
+    // ---- 13. Recalage des partiels tenus (0 latence) ---------------------------
+    {
+        std::printf ("13. recalage des partiels tenus (la mineur)\n");
+        auto runSnap = [&] (juce::AudioBuffer<float>& b)
+        {
+            PartialSnapper ps; ps.prepare (sr); ps.setScale (aMinor); ps.reset();
+            for (int pos = 0; pos < b.getNumSamples(); pos += 512)
+            {
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), b.getNumChannels(), pos, juce::jmin (512, b.getNumSamples() - pos));
+                ps.process (v, b.getNumChannels(), 1.0f);
+            }
+        };
+        // a) 455 Hz (la +59 c) → la 440 Hz, propre
+        {
+            const int len = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, len); b.clear(); sine (b, 455.0, 0.3f);
+            runSnap (b);
+            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
+            std::printf ("     455 Hz -> %.2f Hz, résidu %.1f dB\n", hz, resid);
+            check (std::abs (hz - 440.0) < 0.5 && resid < -35.0, "partiel faux déplacé sur la note (pas seulement atténué)");
+        }
+        // b) notes justes : même hauteur, même niveau
+        {
+            const int len = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, len); b.clear(); sine (b, 440.0, 0.3f);
+            juce::AudioBuffer<float> b2 (2, len); b2.clear(); sine (b2, 440.0, 0.3f); sine (b2, 659.26, 0.2f);
+            const float r1 = b.getRMSLevel (0, len / 2, len / 2), r2 = b2.getRMSLevel (0, len / 2, len / 2);
+            const auto ref = b;
+            runSnap (b); runSnap (b2);
+            float diff = 0; for (int n = len / 4; n < len; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
+            const auto [hz, resid] = dominantFrequency (b2.getReadPointer (0) + len / 2, len / 2);
+            const float lv = juce::Decibels::gainToDecibels (b2.getRMSLevel (0, len / 2, len / 2) / r2);
+            std::printf ("     la4 seul : écart max %.5f | la4 + mi5 : %.2f Hz, niveau %+.2f dB\n", diff, hz, lv);
+            check (diff < 0.001f && std::abs (hz - 440.0) < 0.3 && std::abs (lv) < 0.3f && r1 > 0.0f, "notes justes inchangées");
+        }
+        // c) zéro latence : un clic ressort au même échantillon
+        {
+            juce::AudioBuffer<float> b (2, 4096); b.clear(); b.setSample (0, 100, 1.0f); b.setSample (1, 100, 1.0f);
+            runSnap (b);
+            int peakAt = 0; for (int n = 0; n < 4096; ++n) if (std::abs (b.getSample (0, n)) > std::abs (b.getSample (0, peakAt))) peakAt = n;
+            std::printf ("     clic : crête à l'échantillon %d (entrée : 100)\n", peakAt);
+            check (peakAt == 100, "zéro latence");
+        }
+        // d) bruit : niveau conservé (rien n'est « recalé » dans un bruit)
+        {
+            const int len = (int) sr * 3;
+            juce::AudioBuffer<float> b (2, len);
+            std::mt19937 rng (9); std::normal_distribution<float> nd (0.0f, 0.1f);
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n) b.setSample (c, n, nd (rng));
+            const float before = b.getRMSLevel (0, len / 2, len / 2);
+            runSnap (b);
+            const float lv = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / before);
+            std::printf ("     bruit : niveau %+.2f dB\n", lv);
+            check (std::abs (lv) < 0.5f, "bruit : niveau conservé");
+        }
+        // e) robustesse : gammes et bruits brutaux, aucune valeur invalide
+        {
+            PartialSnapper ps; ps.prepare (sr);
+            juce::AudioBuffer<float> b (2, 128);
+            std::mt19937 rng (4); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+            bool finite = true; float peak = 0;
+            for (int blk = 0; blk < (int) (8 * sr / 128); ++blk)
+            {
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) b.setSample (c, n, (blk % 40 < 20 ? 0.9f : 0.05f) * u (rng));
+                ps.setScale (frame::scaleMask ((blk / 13) % 12, (blk / 31) % 2 ? frame::Mode::minor : frame::Mode::major));
+                ps.process (b, 2, (blk / 50) % 3 ? 1.0f : 0.0f);
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
+            }
+            std::printf ("     automation brutale : crête %.2f\n", peak);
+            check (finite && peak < 4.0f, "recalage stable");
+        }
+    }
+
+    // ---- 14. SCAN : détection de la tonalité ----------------------------------
+    {
+        std::printf ("14. scan : détection de la tonalité\n");
+        auto renderKey = [&] (int tonic, bool minor)
+        {
+            // accords + basse + mélodie dans la gamme, 9 s
+            constexpr int majS[7] = { 0, 2, 4, 5, 7, 9, 11 }, minS[7] = { 0, 2, 3, 5, 7, 8, 10 };
+            const int* scl = minor ? minS : majS;
+            const int prog[4] = { 0, minor ? 5 : 3, minor ? 2 : 4, 0 };
+            const int len = (int) (sr * 9.0);
+            juce::AudioBuffer<float> b (2, len); b.clear();
+            std::mt19937 rng ((unsigned) (tonic * 7 + (minor ? 1 : 0)));
+            auto addTone = [&] (int midi, int start, int dur, float amp)
+            {
+                const double f = frame::midiToHz (midi);
+                for (int n = 0; n < dur && start + n < len; ++n)
+                {
+                    const double t = n / sr; double v = 0.0;
+                    for (int k = 1; k <= 6; ++k) if (f * k < sr * 0.45) v += std::sin (juce::MathConstants<double>::twoPi * f * k * t) / k;
+                    const float e = (float) (std::min (1.0, t / 0.01) * std::exp (-t * 1.2));
+                    b.addSample (0, start + n, amp * e * (float) v); b.addSample (1, start + n, amp * e * (float) v);
+                }
+            };
+            for (int bar = 0; bar < 4; ++bar)
+            {
+                const int deg = prog[bar], t0 = (int) (bar * 2.2 * sr), dur = (int) (2.2 * sr);
+                for (int i : { 0, 2, 4 }) addTone (60 + tonic + scl[(deg + i) % 7] + 12 * ((deg + i) / 7), t0, dur, 0.05f);
+                addTone (36 + tonic + scl[deg], t0, dur, 0.1f);
+                for (int k = 0; k < 8; ++k) addTone (72 + tonic + scl[rng() % 7], t0 + (int) (k * 0.275 * sr), (int) (0.27 * sr), 0.04f);
+            }
+            KeyDetector kd; kd.prepare (sr); kd.start();
+            for (int pos = 0; pos < len && ! kd.isDone(); pos += 512)
+                kd.push (b.getReadPointer (0, pos), b.getReadPointer (1, pos), juce::jmin (512, len - pos));
+            return std::make_tuple (kd.getTonic(), kd.getMode(), kd.isDone());
+        };
+        int okSets = 0, total = 0;
+        for (auto [t, m] : { std::pair { 7, false }, std::pair { 4, true }, std::pair { 6, false }, std::pair { 1, true }, std::pair { 10, false }, std::pair { 2, true } })
+        {
+            const auto [dt, dm, done] = renderKey (t, m);
+            const bool sameSet = dt >= 0 && frame::scaleMask (dt, dm ? frame::Mode::minor : frame::Mode::major)
+                                         == frame::scaleMask (t, m ? frame::Mode::minor : frame::Mode::major);
+            std::printf ("     %s %s -> %s %s%s\n", frame::noteNames[t], m ? "minor" : "major",
+                         dt >= 0 ? frame::noteNames[dt] : "?", dm ? "minor" : "major", sameSet ? "" : "  (gamme différente)");
+            okSets += (sameSet && done) ? 1 : 0; ++total;
+        }
+        check (okSets == total, "scan : la bonne gamme est trouvée (6 tonalités)");
+    }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");
     return failures == 0 ? 0 : 1;
