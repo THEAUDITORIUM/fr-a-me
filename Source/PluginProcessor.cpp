@@ -15,7 +15,8 @@ FrameAudioProcessor::FrameAudioProcessor()
                           .withOutput ("output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "FRAME_STATE", createParameterLayout())
 {
-    mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
+    harmoParam = apvts.getRawParameterValue (ParamIDs::harmo);
+    pitchParam = apvts.getRawParameterValue (ParamIDs::pitch);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
     retuneParam = apvts.getRawParameterValue (ParamIDs::retune);
@@ -28,9 +29,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    // 1. MIX : 0–100 %, défaut 100 %.
+    // 1. HARMO (ancien MIX) : 0–100 %, défaut 100 %. Dose uniquement le
+    //    traitement harmonique (peigne + harmoniques) : à 0 %, reverb, retune,
+    //    pitch et gain continuent de fonctionner.
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::mix, 1 }, "mix",
+        ParameterID { ParamIDs::harmo, 1 }, "harmo",
         NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
         AudioParameterFloatAttributes()
             .withLabel ("%")
@@ -55,6 +58,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withLabel ("dB")
             .withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789.").getFloatValue(); })));
+
+    // 3b. PITCH : −12 … +12 demi-tons (elastic), défaut 0.
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::pitch, 1 }, "pitch",
+        NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
+        AudioParameterFloatAttributes()
+            .withLabel ("st")
+            .withStringFromValueFunction ([] (float v, int) { const int st = roundToInt (v); return (st > 0 ? "+" : "") + String (st) + " st"; })
+            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789").getFloatValue(); })));
 
     // 4. RETUNE : case à cocher (désactivée par défaut).
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::retune, 1 }, "retune", false));
@@ -106,8 +118,10 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     wetBuffer.setSize (2, maxChunk, false, true, false);
     analysisBuffer.setSize (2, maxChunk, false, true, false);
 
-    mixSmoothed.reset (sampleRate, 0.05);              // 50 ms de lissage : pas de clic
-    mixSmoothed.setCurrentAndTargetValue (mixParam->load() * 0.01f);
+    harmoSmoothed.reset (sampleRate, 0.05);            // 50 ms de lissage : pas de clic
+    harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
+    preHarmoBuffer.setSize (2, maxChunk, false, true, false);
+    pitcher.prepare (sampleRate);
 
     engine.setScaleMask (getCurrentScaleMask());
     samplesPerWaveSlice = engine.getFftSize() / 8;     // l'onde défile à la même vitesse que le spectrogramme
@@ -178,6 +192,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         engine.reset();
         harmonizer.reset();
         retuner.reset();
+        pitcher.reset();
         reverb.reset();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
@@ -189,7 +204,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     harmonizer.setScale (getCurrentScaleMask());       // gains glissés si la gamme change
     retuner.setScale (getCurrentScaleMask());          // fondu croisé si la gamme change
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
-    mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
+    harmoSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (harmoParam->load()) * 0.01f));
 
     // REVERB : lissage exponentiel (~60 ms), une fois par bloc. La
     // fréquence d'échantillonnage vient de prepareToPlay (jamais 0 ici).
@@ -228,7 +243,23 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
     retuner.process (wetView, numChannels,                   // 2. RETUNE (si coché) : vocodeur sur la gamme
                      retuneParam->load() > 0.5f ? 1.0f : 0.0f);
+    for (int c = 0; c < numChannels; ++c)                    // (copie pour le dosage HARMO)
+        preHarmoBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
     harmonizer.process (wetView, numChannels, 1.0f);         // 3. peigne + harmoniques justes (0 latence)
+
+    // HARMO : dosage du traitement harmonique seul (100 % = son de la 2.0.0).
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float h = harmoSmoothed.getNextValue();
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const float pre = preHarmoBuffer.getSample (c, i);
+            wetBuffer.setSample (c, i, pre + h * (wetBuffer.getSample (c, i) - pre));
+        }
+    }
+
+    pitcher.process (wetView, numChannels,                   // 4. PITCH (elastic), contourné à 0
+                     juce::jlimit (-12.0f, 12.0f, finiteOrZero (pitchParam->load())));
    #ifdef FRAME_TEST_SIMULATE_WET_LOSS
     wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
    #endif
@@ -246,7 +277,6 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float m = mixSmoothed.getNextValue();
         const float og = outputGain.getNextValue();
 
         float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
@@ -268,7 +298,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             guardDry += (delayed * delayed - guardDry) * guardCoef;
             guardWet += (rawWet * rawWet - guardWet) * guardCoef;
 
-            outFrame[c] = (delayed + m * (wet - delayed)) * og;
+            outFrame[c] = wet * og;          // chaque module est dosé par son propre bouton
 
             inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
         }
@@ -341,6 +371,18 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
         for (int i = 0; i < buffer.getNumSamples(); ++i)
             if (! std::isfinite (buffer.getSample (c, i)))
                 buffer.setSample (c, i, 0.0f);
+}
+
+//==============================================================================
+juce::String FrameAudioProcessor::getTheme() const
+{
+    const auto t = apvts.state.getProperty ("theme", "light").toString();
+    return (t == "dark" || t == "garden") ? t : juce::String ("light");
+}
+
+void FrameAudioProcessor::setTheme (const juce::String& theme)
+{
+    apvts.state.setProperty ("theme", theme, nullptr);
 }
 
 //==============================================================================

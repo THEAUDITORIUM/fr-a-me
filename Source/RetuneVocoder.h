@@ -2,9 +2,12 @@
   ==============================================================================
     fr(a)me — RetuneVocoder.h
 
-    RETUNE : vocodeur dont les porteuses sont les notes de la gamme.
-    0 latence (filtres IIR + suivi d'enveloppe causal), comme un vocodeur
-    temps réel (Vocodex).
+    RETUNE (2.1) : vocodeur robotique façon Vocodex, dont les porteuses sont
+    les notes de la gamme. 0 latence (filtres IIR + suivi d'enveloppe causal).
+    Aucune note n'est retirée : toutes les bandes sonnent (sélectivité douce),
+    chaque porteuse est « robotique » (fondamentale + octave), les bandes sont
+    réparties gauche / droite, et une part du son d'origine est gardée pour
+    conserver glissés, textures et variations. Le niveau suit le son d'origine.
 
       • Pour chaque note de la gamme de mi1 (41 Hz) à do9 (8.4 kHz), une bande
         d'analyse couvre tout l'espace jusqu'aux notes de la gamme voisines
@@ -71,8 +74,10 @@ private:
         double cosW = 1.0, sinW = 1.0; // pour la composante en quadrature
         double prev[2] {};
         float env[2] {};
-        double phase = 0.0, phaseInc = 0.0, sinNow = 0.0;
+        double phase = 0.0, phaseInc = 0.0, sinNow = 0.0, sin2Now = 0.0, cosNow = 1.0, cos2Now = 1.0;
         float gain = 1.0f;             // gain de sortie (inclinaison + normalisation)
+        float panL = 1.0f, panR = 1.0f;// position stéréo de la bande
+        bool  buzzOk = true;           // l'octave de la porteuse reste sous Nyquist
     };
 
     struct Bank
@@ -95,4 +100,5 @@ private:
     float envAttack = 0.5f, envRelease = 0.01f;
     float expansion = 2.0f;                          // sélectivité (notes jouées vs fond)
     float amountSmoothed = 0.0f, amountCoef = 0.001f;
+    float eIn = 0.0f, eVoc = 0.0f, levelGain = 1.0f, levelCoef = 0.0001f, levelUp = 0.001f;
 };

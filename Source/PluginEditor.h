@@ -10,6 +10,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
 #include "PluginProcessor.h"
 #include "FrameLookAndFeel.h"
 #include "Visualisers.h"
@@ -30,6 +31,13 @@ public:
     /** Appelé par le timer de l'éditeur : vide les FIFO et rafraîchit. */
     void refresh();
 
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+
+    /** Applique un thème (palette, spectrogramme, look-and-feel, sauvegarde). */
+    void applyTheme (Theme t);
+    std::function<void()> onThemeChanged;
+
 private:
     void drawTimeAxis (juce::Graphics&, juce::Rectangle<float> span);
     void drawFrequencyLabels (juce::Graphics&, juce::Rectangle<float> band);
@@ -41,8 +49,8 @@ private:
     SpectrogramBand spectrumBand;
     PartialScore partialBand;
 
-    juce::Slider mixKnob, reverbKnob, gainKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, reverbAttachment, gainAttachment;
+    juce::Slider harmoKnob, reverbKnob, gainKnob, pitchKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmoAttachment, reverbAttachment, gainAttachment, pitchAttachment;
 
     void setupKnob (juce::Slider& knob, const juce::String& name, double resetValue,
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
@@ -59,6 +67,11 @@ private:
     const juce::Rectangle<float> spectrumArea { 80.0f, 310.0f, 840.0f, 140.0f };
     const juce::Rectangle<float> partialArea  { 80.0f, 476.0f, 840.0f, 100.0f };
     const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };   // petit bouton gain, en haut à droite
+    const juce::Rectangle<int>   pitchArea    { 812, 12, 40, 40 };   // petit bouton pitch, à côté de gain
+    juce::Rectangle<float> themeIconArea (Theme t) const
+    {
+        return { 690.0f + 30.0f * (float) (int) t, 20.0f, 24.0f, 24.0f };   // soleil, lune, arbre
+    }
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
     const juce::Rectangle<int>   modeArea     { 430, 646, 170, 36 };

@@ -66,6 +66,7 @@ public:
 
     void push (const SpectralFrameInfo& frame);
     void setScaleMask (uint16_t mask);
+    void refreshTheme();
     void paint (juce::Graphics&) override;
 
 private:

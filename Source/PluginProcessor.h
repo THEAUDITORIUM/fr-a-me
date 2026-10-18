@@ -13,6 +13,7 @@
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
 #include "RetuneVocoder.h"
+#include "PitchShifter.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -24,7 +25,8 @@ struct WaveSlice
 
 namespace ParamIDs
 {
-    inline constexpr const char* mix   = "mix";
+    inline constexpr const char* harmo = "harmo";   // ancien « mix »
+    inline constexpr const char* pitch = "pitch";
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* gain   = "gain";
     inline constexpr const char* retune = "retune";
@@ -36,6 +38,10 @@ class FrameAudioProcessor final : public juce::AudioProcessor
 {
 public:
     FrameAudioProcessor();
+
+    /** Thème de l'interface (« light », « dark », « garden »), sauvegardé avec le projet. */
+    juce::String getTheme() const;
+    void setTheme (const juce::String& theme);
     ~FrameAudioProcessor() override = default;
 
     //==============================================================================
@@ -99,8 +105,10 @@ private:
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
     RetuneVocoder retuner;                // RETUNE (case à cocher) : vocodeur sur les notes de la gamme, 0 latence
+    PitchShifter pitcher;                 // PITCH −12…+12 (elastic), en fin de chaîne
 
-    std::atomic<float>* mixParam  = nullptr;
+    std::atomic<float>* harmoParam = nullptr;
+    std::atomic<float>* pitchParam = nullptr;
     std::atomic<float>* reverbParam = nullptr;
     std::atomic<float>* gainParam = nullptr;
     std::atomic<float>* retuneParam = nullptr;
@@ -126,7 +134,8 @@ private:
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* noteParam = nullptr;
 
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmoothed;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> harmoSmoothed;
+    juce::AudioBuffer<float> preHarmoBuffer;     // signal avant l'harmonie (pour le dosage HARMO)
 
     // Tampons pré-alloués (prepareToPlay) : aucun malloc dans processBlock.
     juce::AudioBuffer<float> dryBuffer, wetBuffer;

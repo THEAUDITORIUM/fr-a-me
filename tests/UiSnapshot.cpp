@@ -28,7 +28,9 @@ int main (int argc, char** argv)
     if (auto* note = proc.apvts.getParameter (ParamIDs::note)) note->setValueNotifyingHost (note->convertTo0to1 (9.0f)); // a
     if (auto* mode = proc.apvts.getParameter (ParamIDs::mode)) mode->setValueNotifyingHost (1.0f);                      // minor
     if (auto* rt = proc.apvts.getParameter (ParamIDs::retune)) rt->setValueNotifyingHost (1.0f);                      // retune coché
+    if (auto* pt = proc.apvts.getParameter (ParamIDs::pitch)) pt->setValueNotifyingHost (pt->convertTo0to1 (0.0f));
 
+    if (argc > 3) proc.setTheme (argv[3]);                                   // light / dark / garden
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     editor->setSize (width, (int) std::round (width * 760.0 / 1000.0));
     auto* canvas = dynamic_cast<FrameCanvas*> (editor->getChildComponent (0));

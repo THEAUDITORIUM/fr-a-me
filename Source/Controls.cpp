@@ -47,7 +47,7 @@ void ModeToggle::paint (juce::Graphics& g)
         }
 
         drawMonoText (g, labels[i], r, 15.0f, juce::Justification::centred,
-                      active ? Palette::ink : Palette::pencil, active);
+                      active ? Palette::onAccent : Palette::pencil, active);
     }
 
     drawMonoText (g, "/", getLocalBounds().toFloat(), 15.0f, juce::Justification::centred, Palette::pencil);
@@ -96,7 +96,7 @@ void RetuneToggle::paint (juce::Graphics& g)
         tick.startNewSubPath (sq.getX() + box * 0.22f, sq.getCentreY());
         tick.lineTo (sq.getX() + box * 0.43f, sq.getBottom() - box * 0.25f);
         tick.lineTo (sq.getRight() - box * 0.2f, sq.getY() + box * 0.25f);
-        g.setColour (Palette::ink);
+        g.setColour (Palette::onAccent);
         g.strokePath (tick, juce::PathStrokeType (1.3f));
     }
     g.setColour (Palette::ink);
@@ -171,7 +171,7 @@ void NoteRow::paint (juce::Graphics& g)
         g.drawRect (r, 0.7f);
 
         drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), 12.0f,
-                      juce::Justification::centred, active ? Palette::ink : Palette::graphite, active, 0.04f);
+                      juce::Justification::centred, active ? Palette::onAccent : Palette::graphite, active, 0.04f);
 
         // Point sous les notes de la gamme courante (jaune pour la tonique).
         if (frame::maskContains (mask, i))

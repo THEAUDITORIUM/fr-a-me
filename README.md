@@ -4,10 +4,12 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **mix** (0–100 %), **retune** (case à cocher, vocodeur sur la gamme), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gain** de sortie (−24 … +12 dB, petit bouton en haut à droite), **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **harmo** (0–100 %, dose l'harmonie), **retune** (case à cocher, vocodeur robotique façon Vocodex), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **thèmes** light / dark / garden (soleil, lune, arbre), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
-![interface](docs/interface.png)
+| light | dark | garden |
+|---|---|---|
+| ![light](docs/interface_light.png) | ![dark](docs/interface_dark.png) | ![garden](docs/interface_garden.png) |
 
 ## Télécharger
 
@@ -139,8 +141,10 @@ Résultats obtenus pendant le développement (48 kHz) :
 | vos hi-hats, chaîne complète | 90–92 % de l'énergie sur les notes de la gamme, hors gamme −25 à −41 dB, niveau identique |
 | RETUNE : clic | sortie dès l'échantillon 0 (aucune latence) |
 | RETUNE : la#4 en la mineur | ressort à 440.02 Hz (la4, +0.1 cent) |
-| RETUNE vs exemples fournis | bandes à ±2 dB, relief 0.8–0.99, profil harmonique 0.73–0.88 |
-| automation brutale REVERB / GAIN / RETUNE / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| RETUNE vs exemple Vocodex | stéréo 0.44 (0.43), relief 0.91, son d'origine 0.51, partiels justes 79 % |
+| PITCH +12 / −12 / +7 / −5 | 440.0 / 110.0 / 329.7 / 164.8 Hz depuis 220 Hz (±0.2 cent) ; 0 = inchangé |
+| HARMO à 0 | reverb, retune et pitch actifs ; tout à 0 → son d'origine (corrélation 0.999) |
+| automation brutale HARMO / REVERB / RETUNE / PITCH / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -156,7 +160,8 @@ frame/
 │   ├── PluginProcessor.*     paramètres (APVTS), latence, mix dry/wet, état, bypass
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
-│   ├── RetuneVocoder.*       RETUNE : vocodeur sur les notes de la gamme (0 latence)
+│   ├── RetuneVocoder.*       RETUNE : vocodeur robotique sur les notes de la gamme (0 latence)
+│   ├── PitchShifter.*        PITCH : transposition elastic (SOLA)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
@@ -233,18 +238,29 @@ Le déplacement des notes fausses (vocodeur de phase des versions ≤ 1.8) deman
 obligatoirement une analyse avec retard : il n'est plus utilisé pour le son. Le moteur
 spectral sert désormais uniquement aux visualisations.
 
-**RETUNE** (case à cocher, 2.0) : un vocodeur dont les porteuses sont les notes de la
-gamme, sans latence (filtres + suivi d'enveloppe, comme le Vocodex). Pour chaque note de
-la gamme de mi1 à sol9, une bande d'analyse couvre l'espace jusqu'aux notes voisines :
-toute l'énergie du son est attribuée à la note de la gamme la plus proche, puis
-resynthétisée par un oscillateur exactement accordé — recalage complet, aspect vocodeur.
-Une sélectivité (chaque bande comparée à ses voisines) ne fait sonner que les notes
-réellement jouées. Calé sur les exemples fournis (do# maj, fa# maj, mi min, la min,
-la maj) : bandes à ±2 dB, relief conservé (0.8–0.99), profil harmonique corrélé
-0.73–0.88 ; un la#4 en la mineur ressort à 440.02 Hz. Il se place après la réverbe (la
-queue est retunée aussi) et avant le peigne et les harmoniques de la 1.9, qui
-s'appliquent par-dessus. Coché / décoché : fondu de 30 ms, changement de gamme : fondu
-croisé de 60 ms, sans clic.
+**RETUNE** (case à cocher, refait en 2.1 — façon Vocodex) : vocodeur robotique sans
+latence dont les porteuses sont les notes de la gamme (mi1 → sol9). Aucune note n'est
+retirée : toutes les bandes sonnent, chaque porteuse est « robotique » (fondamentale +
+octave), les bandes sont réparties gauche / droite, et une part du son d'origine est gardée
+pour conserver glissés, textures et variations ; le niveau suit le son d'origine. Comparé à
+l'exemple Vocodex fourni : largeur stéréo identique (corrélation G/D 0.44 contre 0.43),
+relief 0.91 (0.80), son d'origine présent à 0.51 (0.41), mais 79 % des partiels exactement
+justes (26 % pour le Vocodex) — tout est accordé.
+
+**HARMO** (ancien MIX, 0–100 %) : dose uniquement le traitement harmonique (peigne +
+harmoniques justes) ; à 100 % le son est celui de la 2.0.0. À 0 %, la réverbe, le retune,
+le pitch et le gain fonctionnent toujours : chaque bouton agit seul, et ensemble ils
+s'enchaînent dans cet ordre — reverb → retune → harmo → pitch → gain — pour que tout ce qui
+est ajouté (queue, porteuses) passe dans la gamme.
+
+**PITCH** (−12 … +12 demi-tons, 0 par défaut), façon elastic pitch : la hauteur change, pas
+la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi par corrélation
+(type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
+saut de phase. À 0, contourné : son strictement inchangé.
+
+**Thèmes** (en haut à droite) : soleil = light (la planche de base), lune = dark, petit
+arbre = garden (verts mousse, papier chaud, aplats de collage végétal, brin au crayon). Le
+thème est sauvegardé avec le projet.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
@@ -306,7 +322,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **reverb** (double-clic = 30 %), **gain** (double-clic = 0 dB), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **harmo** (double-clic = 100 %), **reverb** (double-clic = 30 %), **pitch** (double-clic = 0), **gain** (double-clic = 0 dB), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

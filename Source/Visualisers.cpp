@@ -66,6 +66,14 @@ SpectrogramBand::SpectrogramBand()
     image.clear (image.getBounds(), Palette::paper);
 }
 
+void SpectrogramBand::refreshTheme()
+{
+    image.clear (image.getBounds(), Palette::paper);
+    for (int c = 0; c < columns; ++c)
+        renderColumn (c);
+    repaint();
+}
+
 void SpectrogramBand::setScaleMask (uint16_t newMask)
 {
     if (newMask == mask)
@@ -96,8 +104,8 @@ void SpectrogramBand::push (const SpectralFrameInfo& frame)
 
 void SpectrogramBand::renderColumn (int col)
 {
-    static const juce::Colour scaleInk (0xffc8b52c);          // encre jaune des fréquences de la gamme
-    static const juce::Colour scalePaper = Palette::paper.interpolatedWith (Palette::accent, 0.10f);
+    const juce::Colour scaleInk = Palette::scaleInk;               // encre des fréquences de la gamme
+    const juce::Colour scalePaper = Palette::paper.interpolatedWith (Palette::accent, 0.10f);
 
     for (int r = 0; r < rows; ++r)
     {
@@ -177,7 +185,7 @@ void PartialScore::paint (juce::Graphics& g)
             const float y = b.getBottom() - padY - col.y[p] * h;
             const float r = 0.8f + lvl * lvl * 3.6f;                    // taille ∝ amplitude
 
-            g.setColour (col.snapped[p] ? Palette::accent : juce::Colours::white);
+            g.setColour (col.snapped[p] ? Palette::accent : Palette::scoreDot);
 
             if (lvl > 0.35f)                                          // ronds pleins
                 g.fillEllipse (x - r, y - r, 2.0f * r, 2.0f * r);

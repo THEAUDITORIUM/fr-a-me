@@ -11,16 +11,40 @@
 namespace
 {
     // Calibrage (comparaison avec les exemples de référence) :
-    // Valeurs calées en comparant fr(a)me aux exemples de référence fournis
-    // (do# maj, fa# maj, mi min, la min, la maj) : niveau identique (−21.7 dB),
-    // bandes à ±2 dB, relief 0.8–0.99, profil harmonique corrélé à 0.73–0.88.
-    constexpr float  RT_GAIN = 0.36f;
-    constexpr float  RT_TILT = -5.0f;
-    constexpr float  RT_REL  = 0.004f;      // relâchement de l'enveloppe (s)
-    constexpr double RT_BW   = 2.2;         // largeur des bandes (facteur par étage)
-    constexpr float  RT_EXP  = 2.0f;        // sélectivité
-    constexpr float outputGain = RT_GAIN;   // niveau global de la nappe vocodée
+    // RETUNE 2.1 — vocodeur robotique façon Vocodex.
+   #ifndef RT_GAIN
+    #define RT_GAIN 0.36f
+   #endif
+   #ifndef RT_TILT
+    #define RT_TILT -5.0f
+   #endif
+   #ifndef RT_REL
+    #define RT_REL 0.008f
+   #endif
+   #ifndef RT_BW
+    #define RT_BW 2.2
+   #endif
+   #ifndef RT_EXP
+    #define RT_EXP 1.35f
+   #endif
+   #ifndef RT_KEEP
+    #define RT_KEEP 0.35f
+   #endif
+   #ifndef RT_BUZZ
+    #define RT_BUZZ 0.45f
+   #endif
+   #ifndef RT_SPREAD
+    #define RT_SPREAD 0.55f
+   #endif
+    constexpr float outputGain = RT_GAIN;   // niveau de la nappe vocodée (avant compensation)
     constexpr float highTiltDb = RT_TILT;   // aigus en retrait au-dessus de 2 kHz
+    constexpr float keepOriginal = RT_KEEP; // part du son d'origine gardée (variations, glissés, textures)
+    constexpr float buzz = RT_BUZZ;         // timbre robotique : octave ajoutée à chaque porteuse
+    constexpr float stereoSpread = RT_SPREAD; // bandes alternées gauche / droite (largeur Vocodex)
+   #ifndef RT_ANGLE
+    #define RT_ANGLE 1.05
+   #endif
+    const double stereoCos = std::cos (RT_ANGLE), stereoSin = std::sin (RT_ANGLE);   // décalage de phase du canal droit
 }
 
 void RetuneVocoder::prepare (double newSampleRate)
@@ -31,6 +55,8 @@ void RetuneVocoder::prepare (double newSampleRate)
     amountCoef   = 1.0f - std::exp (-1.0f / (0.030f * (float) sampleRate));
     crossfadeStep = 1.0f / (0.06f * (float) sampleRate);
     expansion = RT_EXP;
+    levelCoef = 1.0f - std::exp (-1.0f / (0.3f  * (float) sampleRate));
+    levelUp   = 1.0f - std::exp (-1.0f / (0.05f * (float) sampleRate));
 
     const uint16_t m = mask;
     hasBank = false;
@@ -50,6 +76,8 @@ void RetuneVocoder::reset() noexcept
             b.env[0] = b.env[1] = 0.0f;
         }
     crossfade = 1.0f;
+    eIn = eVoc = 0.0f;
+    levelGain = 1.0f;
 }
 
 void RetuneVocoder::setScale (uint16_t newMask) noexcept
@@ -125,10 +153,19 @@ void RetuneVocoder::buildBank (Bank& bank, uint16_t m) noexcept
         b.phaseInc = juce::MathConstants<double>::twoPi * hz / sampleRate;
         b.phase = std::fmod ((double) note * 2.39996322972865332, juce::MathConstants<double>::twoPi);   // phases étalées (pas d'impulsion commune)
         b.sinNow = std::sin (b.phase);
+        b.cosNow = std::cos (b.phase);
+        b.sin2Now = std::sin (2.0 * b.phase);
+        b.cos2Now = std::cos (2.0 * b.phase);
 
         // Inclinaison douce dans l'aigu (au-dessus de 2 kHz).
         const double octAbove2k = juce::jmax (0.0, std::log2 (hz / 2000.0));
         b.gain = outputGain * (float) std::pow (10.0, highTiltDb * juce::jmin (2.0, octAbove2k) / 2.0 / 20.0);
+
+        // Bandes alternées gauche / droite (le grave reste au centre).
+        const float side = (bank.count % 2 == 0 ? 1.0f : -1.0f) * stereoSpread * (float) juce::jlimit (0.0, 1.0, std::log2 (hz / 150.0));
+        b.panL = std::sqrt (0.5f * (1.0f - side)) * 1.41421356f;
+        b.panR = std::sqrt (0.5f * (1.0f + side)) * 1.41421356f;
+        b.buzzOk = hz * 2.0 < nyq;
     }
 }
 
@@ -168,12 +205,22 @@ void RetuneVocoder::runBank (Bank& bank, const double* in, int nch, double* out)
                                                                          : e * std::pow (r, expansion - 1.0f);
         }
 
-        // 3. Synthèse : un oscillateur exactement sur chaque note de la gamme.
+        // 3. Synthèse : sur chaque note de la gamme, une porteuse « robotique »
+        //    (fondamentale + octave, en phase) exactement accordée ; bandes
+        //    réparties gauche / droite.
         double acc = 0.0;
         for (int i = 0; i < bank.count; ++i)
         {
             const auto& b = bank.bands[(size_t) i];
-            acc += (double) (bank.shaped[(size_t) i] * b.gain) * b.sinNow;
+            // Canal droit : même note, phase décalée de ~60° → gauche et droite
+            // partiellement décorrélés (largeur façon Vocodex, sans désaccord,
+            // et sans perte en mono).
+            const double f1 = b.sinNow + (b.buzzOk ? (double) buzz * b.sin2Now : 0.0);
+            const double carrier = (c == 0 || nch < 2)
+                                 ? f1
+                                 : stereoCos * f1 + stereoSin * (b.cosNow + (b.buzzOk ? (double) buzz * b.cos2Now : 0.0));
+            const float pan = nch > 1 ? (c == 0 ? b.panL : b.panR) : 1.0f;
+            acc += (double) (bank.shaped[(size_t) i] * b.gain * pan) * carrier;
         }
         out[c] += acc;
     }
@@ -185,6 +232,9 @@ void RetuneVocoder::runBank (Bank& bank, const double* in, int nch, double* out)
         if (b.phase > juce::MathConstants<double>::twoPi)
             b.phase -= juce::MathConstants<double>::twoPi;
         b.sinNow = std::sin (b.phase);
+        b.cosNow = std::cos (b.phase);
+        b.sin2Now = 2.0 * b.sinNow * b.cosNow;                 // sin(2φ)
+        b.cos2Now = 1.0 - 2.0 * b.sinNow * b.sinNow;           // cos(2φ)
     }
 }
 
@@ -222,10 +272,28 @@ void RetuneVocoder::process (juce::AudioBuffer<float>& buffer, int numChannels, 
         }
 
         const double xf = (double) crossfade;
+        double voc[2] = { 0.0, 0.0 };
+        float inE = 0.0f, vocE = 0.0f;
         for (int c = 0; c < nch; ++c)
         {
-            const double wet = wetOld[c] * (1.0 - xf) + wetNew[c] * xf;
-            const double y = in[c] + (double) amountSmoothed * (wet - in[c]);
+            // Nappe vocodée + une part du son d'origine : aucune partie du
+            // sample n'est perdue (glissés, textures, attaques restent là).
+            voc[c] = wetOld[c] * (1.0 - xf) + wetNew[c] * xf + (double) keepOriginal * in[c];
+            inE  += (float) (in[c] * in[c]);
+            vocE += (float) (voc[c] * voc[c]);
+        }
+
+        // Volume : le son « retune » garde le niveau du son d'origine
+        // (remonte en ~50 ms, redescend en ~300 ms).
+        eIn  += (inE  - eIn)  * levelCoef;
+        eVoc += (vocE - eVoc) * levelCoef;
+        const float target = eVoc > 1.0e-12f ? juce::jlimit (0.25f, 4.0f, std::sqrt (eIn / eVoc)) : levelGain;
+        levelGain += (target - levelGain) * (target > levelGain ? levelUp : levelCoef);
+        if (! std::isfinite (levelGain)) levelGain = 1.0f;
+
+        for (int c = 0; c < nch; ++c)
+        {
+            const double y = in[c] + (double) amountSmoothed * (voc[c] * (double) levelGain - in[c]);
             data[c][i] = std::isfinite (y) ? (float) y : 0.0f;
         }
     }

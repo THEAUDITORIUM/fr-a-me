@@ -19,6 +19,7 @@
 #include "../Source/AmbientReverb.h"
 #include "../Source/ZeroLatencyHarmonizer.h"
 #include "../Source/RetuneVocoder.h"
+#include "../Source/PitchShifter.h"
 
 #include <cstdio>
 #include <random>
@@ -652,6 +653,36 @@ int main (int argc, char** argv)
             }
             std::printf ("     on/off + gammes en continu sur bruit fort : crête %.2f\n", peak);
             check (finite && peak < 4.0f, "retune stable");
+        }
+    }
+
+    // ---- 13. PITCH (elastic) --------------------------------------------------
+    {
+        std::printf ("13. pitch (elastic)\n");
+        for (float st : { 12.0f, -12.0f, 7.0f, -5.0f, 0.0f })
+        {
+            PitchShifter ps; ps.prepare (sr);
+            const int len = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, len);
+            b.clear(); sine (b, 220.0, 0.4f);
+            const auto ref = b;
+            for (int pos = 0; pos < len; pos += 512)
+            {
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
+                ps.process (v, 2, st);
+            }
+            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
+            const double expect = 220.0 * std::exp2 (st / 12.0);
+            const double cents = 1200.0 * std::log2 (hz / expect);
+            const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / ref.getRMSLevel (0, len / 2, len / 2));
+            std::printf ("     %+3.0f st : %.1f Hz (attendu %.1f, %+.1f cents), niveau %+.1f dB\n", st, hz, expect, cents, lvl);
+            if (st == 0.0f)
+            {
+                float diff = 0; for (int n = 0; n < len; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
+                check (diff < 1.0e-6f, "pitch 0 : son strictement inchangé (contourné)");
+            }
+            else
+                check (std::abs (cents) < 5.0 && std::abs (lvl) < 3.0f, "transposition juste, niveau conservé");
         }
     }
 
