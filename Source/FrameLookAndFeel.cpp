@@ -272,7 +272,7 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
 void drawFloralDecor (juce::Graphics& g, juce::Rectangle<float> page)
 {
     juce::Random rng (0x7e7a15);
-    paperGrain (g, page, rng, juce::Colour (0xffc76b86), juce::Colour (0xff9a8088));
+    paperGrain (g, page, rng, juce::Colour (0xffc9a3ad), juce::Colour (0xff8a8572));   // grain neutre : fond blanc
 
     const juce::Colour roses[] = { juce::Colour (0xffeeb0c0), juce::Colour (0xfff4c9d3), juce::Colour (0xffe59bb0) };
     const juce::Colour veinInk (0xffcf6a88);

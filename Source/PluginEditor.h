@@ -68,7 +68,8 @@ private:
     const juce::Rectangle<int>   pitchArea    { 812, 12, 40, 40 };   // petit bouton pitch, à côté de gain
     juce::Rectangle<float> themeIconArea (Theme t) const
     {
-        return { 702.0f + 36.0f * (float) (int) t, 20.0f, 24.0f, 24.0f };   // fleur (floral), petit arbre (garden)
+        const float slot = (t == Theme::garden) ? 0.0f : 1.0f;              // garden (défaut) à gauche, floral à droite
+        return { 702.0f + 36.0f * slot, 20.0f, 24.0f, 24.0f };
     }
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };

@@ -79,7 +79,7 @@ void FrameCanvas::applyTheme (Theme t)
 
 void FrameCanvas::mouseUp (const juce::MouseEvent& e)
 {
-    for (auto t : { Theme::floral, Theme::garden })
+    for (auto t : { Theme::garden, Theme::floral })
         if (themeIconArea (t).expanded (3.0f).contains (e.position) && t != Palette::current)
         {
             applyTheme (t);
@@ -90,7 +90,7 @@ void FrameCanvas::mouseUp (const juce::MouseEvent& e)
 void FrameCanvas::mouseMove (const juce::MouseEvent& e)
 {
     bool over = false;
-    for (auto t : { Theme::floral, Theme::garden })
+    for (auto t : { Theme::garden, Theme::floral })
         over = over || themeIconArea (t).expanded (3.0f).contains (e.position);
     setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 }
@@ -148,8 +148,8 @@ void FrameCanvas::paint (juce::Graphics& g)
     drawMonoText (g, "fr(a)me", { 0.0f, 16.0f, (float) designWidth, 34.0f }, 28.0f, J::centred, Palette::ink, true, 0.28f);
     drawMonoText (g, "( spectral harmoniser )", { 0.0f, 50.0f, (float) designWidth, 16.0f }, 11.0f, J::centred, Palette::graphite);
     drawMonoText (g, "plate 01", { left, 22.0f, 200.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil);
-    // Thèmes : fleur (floral), petit arbre (garden).
-    for (auto t : { Theme::floral, Theme::garden })
+    // Thèmes : petit arbre (garden, défaut) à gauche, fleur (floral) à droite.
+    for (auto t : { Theme::garden, Theme::floral })
         drawThemeIcon (g, t, themeIconArea (t), t == Palette::current);
     drawMonoText (g, Palette::toName (Palette::current), { 684.0f, 46.0f, 96.0f, 12.0f }, 8.5f, J::centred, Palette::graphite);
 

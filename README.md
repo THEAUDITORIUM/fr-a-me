@@ -260,8 +260,8 @@ saut de phase. À 0, contourné : son strictement inchangé.
 **Thèmes** (en haut à droite), volontairement sobres — le blanc domine, le rose et le vert
 dosés par touches : petit arbre = **garden**, le thème au lancement (verts d'herbe, trois
 aplats d'herbe couchée dans les marges avec quelques fleurs roses, brin au crayon au bouton
-rose) ; fleur = **floral** (rose pétale : encre prune, trois pétales veinés dans les marges,
-petite fleur rose à la tige verte). Le thème est sauvegardé avec le projet (les projets en
+rose) ; fleur = **floral** (même fond blanc que garden, rose pétale : encre prune, trois pétales veinés dans les marges,
+petite fleur rose à la tige verte). Icônes : garden à gauche, floral à droite. Le thème est sauvegardé avec le projet (les projets en
 « sun » s'ouvrent en floral).
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback

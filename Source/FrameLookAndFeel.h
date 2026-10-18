@@ -50,9 +50,9 @@ namespace Palette
             case Theme::floral:
             default:
                 // rose pétale : papier blanc rosé, encre prune, accent rose, cœur framboise
-                paper = juce::Colour (0xfffdfafa); ink = juce::Colour (0xff3b1a26);
+                paper = juce::Colour (0xfffafbf7); ink = juce::Colour (0xff3b1a26);   // même blanc que garden
                 graphite = juce::Colour (0xff6f4b57); pencil = juce::Colour (0xffbb98a2);
-                faint = juce::Colour (0xfff2e6e9); accent = juce::Colour (0xfff2b3c4);
+                faint = juce::Colour (0xffece8e6); accent = juce::Colour (0xfff2b3c4);
                 accentInk = juce::Colour (0xffcf5a7d); scaleInk = juce::Colour (0xffbd3d66);
                 scoreBlack = juce::Colour (0xff2b1119); scoreDot = juce::Colour (0xfffbe9ee);
                 onAccent = juce::Colour (0xff3b1a26);
