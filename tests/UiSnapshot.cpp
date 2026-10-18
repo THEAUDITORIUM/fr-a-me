@@ -39,7 +39,7 @@ int main (int argc, char** argv)
         set (ParamIDs::eqBellHz[1], 1200.0f); set (ParamIDs::eqBellDb[1], 6.0f);
         set (ParamIDs::eqBellHz[2], 5000.0f); set (ParamIDs::eqBellDb[2], -5.0f); set (ParamIDs::eqBellQ[2], 2.0f);
     }
-    if (argc > 3) proc.setTheme (argv[3]);                                   // sun / garden
+    if (argc > 3) proc.setTheme (argv[3]);                                   // floral / garden
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     editor->setSize (width, (int) std::round (width * 760.0 / 1000.0));
     auto* canvas = dynamic_cast<FrameCanvas*> (editor->getChildComponent (0));

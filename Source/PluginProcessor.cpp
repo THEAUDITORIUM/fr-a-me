@@ -426,10 +426,10 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
 //==============================================================================
 juce::String FrameAudioProcessor::getTheme() const
 {
-    // Thème par défaut : garden. « light » (sessions 2.1) devient « sun » ;
-    // l'ancien « dark » (retiré) devient garden.
+    // Thème par défaut : garden. « sun » / « light » (anciennes sessions)
+    // deviennent floral ; l'ancien « dark » (retiré) devient garden.
     const auto t = apvts.state.getProperty ("theme", "garden").toString();
-    return (t == "sun" || t == "light") ? juce::String ("sun") : juce::String ("garden");
+    return (t == "floral" || t == "sun" || t == "light") ? juce::String ("floral") : juce::String ("garden");
 }
 
 void FrameAudioProcessor::setTheme (const juce::String& theme)

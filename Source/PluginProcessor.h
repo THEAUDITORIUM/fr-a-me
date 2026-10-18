@@ -43,7 +43,7 @@ class FrameAudioProcessor final : public juce::AudioProcessor
 public:
     FrameAudioProcessor();
 
-    /** Thème de l'interface (« garden » par défaut, ou « sun »), sauvegardé avec le projet. */
+    /** Thème de l'interface (« garden » par défaut, ou « floral »), sauvegardé avec le projet. */
     juce::String getTheme() const;
     void setTheme (const juce::String& theme);
     ~FrameAudioProcessor() override = default;

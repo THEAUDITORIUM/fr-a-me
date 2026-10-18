@@ -4,12 +4,12 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **harmo** (0–100 %, dose l'harmonie), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ façon Pro-Q** dans la partie spectrum (coupe basse, 3 cloches, coupe haute ; fréquences de gauche à droite), **thèmes** garden (par défaut) / sun, **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **harmo** (0–100 %, dose l'harmonie), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ façon Pro-Q** dans la partie spectrum (coupe basse, 3 cloches, coupe haute ; fréquences de gauche à droite), **thèmes** garden (par défaut, prairie) / floral (rose pétale), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
-| garden (par défaut) | sun |
+| garden (par défaut) | floral |
 |---|---|
-| ![garden](docs/interface_garden.png) | ![sun](docs/interface_sun.png) |
+| ![garden](docs/interface_garden.png) | ![floral](docs/interface_floral.png) |
 
 ## Télécharger
 
@@ -257,10 +257,13 @@ la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi p
 (type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
 saut de phase. À 0, contourné : son strictement inchangé.
 
-**Thèmes** (en haut à droite) : petit arbre = **garden**, le thème au lancement (verts
-mousse, papier chaud, aplats de collage végétal, brin au crayon) ; soleil = **sun** (la
-planche jaune de base, avec le même principe de collage en tons solaires et un petit
-soleil au crayon). Le thème est sauvegardé avec le projet.
+**Thèmes** (en haut à droite) : petit arbre = **garden**, le thème au lancement — une
+prairie : verts d'herbe, papier de dune, voile de ciel lavande derrière le titre, collages
+d'herbes couchées par le vent dans les marges, touffes de graminées en bas de page, brin et
+épis au crayon. Fleur = **floral** (2.4, remplace « sun ») — rose pétale : encre prune,
+accent rose, lavis d'aquarelle au bord plus foncé, pétales veinés dans les marges,
+éclaboussures d'encre rouille, petite fleur au crayon. Le thème est sauvegardé avec le
+projet (les projets en « sun » s'ouvrent en floral).
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus

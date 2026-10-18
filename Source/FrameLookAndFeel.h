@@ -12,9 +12,10 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-/** Thèmes : « sun » (planche de base, accent jaune, collage solaire) et
-    « garden » (collage végétal : verts mousse, croquis au crayon — thème par défaut). */
-enum class Theme { sun = 0, garden = 1 };
+/** Thèmes : « floral » (rose pétale : lavis d'aquarelle, pétales veinés,
+    éclaboussures d'encre) et « garden » (prairie : herbes couchées par le
+    vent, collage végétal, croquis au crayon — thème par défaut). */
+enum class Theme { floral = 0, garden = 1 };
 
 namespace Palette
 {
@@ -38,28 +39,30 @@ namespace Palette
         switch (t)
         {
             case Theme::garden:
-                paper = juce::Colour (0xfff0eee4); ink = juce::Colour (0xff1e2a1a);
-                graphite = juce::Colour (0xff4f5c45); pencil = juce::Colour (0xff97a189);
-                faint = juce::Colour (0xffd8dccb); accent = juce::Colour (0xffa9cc62);
-                accentInk = juce::Colour (0xff6c962e); scaleInk = juce::Colour (0xff5f8f2a);
-                scoreBlack = juce::Colour (0xff1b2617); scoreDot = juce::Colour (0xffe9edd8);
-                onAccent = juce::Colour (0xff1e2a1a);
+                // prairie : vert d'herbe, papier de dune, encre de mousse
+                paper = juce::Colour (0xffeff0e3); ink = juce::Colour (0xff1d2a1a);
+                graphite = juce::Colour (0xff4b5a40); pencil = juce::Colour (0xff94a083);
+                faint = juce::Colour (0xffd6dcc6); accent = juce::Colour (0xff9cc35c);
+                accentInk = juce::Colour (0xff5d8a2b); scaleInk = juce::Colour (0xff4e7f24);
+                scoreBlack = juce::Colour (0xff1a2716); scoreDot = juce::Colour (0xffe7edd6);
+                onAccent = juce::Colour (0xff1d2a1a);
                 break;
-            case Theme::sun:
+            case Theme::floral:
             default:
-                paper = juce::Colour (0xfff4f3ef); ink = juce::Colour (0xff111111);
-                graphite = juce::Colour (0xff5c5c5a); pencil = juce::Colour (0xff9c9b97);
-                faint = juce::Colour (0xffdcdbd5); accent = juce::Colour (0xffeee97a);
-                accentInk = juce::Colour (0xffcbbf3c); scaleInk = juce::Colour (0xffc8b52c);
-                scoreBlack = juce::Colour (0xff0b0b0b); scoreDot = juce::Colour (0xffffffff);
-                onAccent = juce::Colour (0xff111111);
+                // rose pétale : papier blanc rosé, encre prune, accent rose, cœur framboise
+                paper = juce::Colour (0xfff8f2f1); ink = juce::Colour (0xff3b1a26);
+                graphite = juce::Colour (0xff6f4b57); pencil = juce::Colour (0xffbb98a2);
+                faint = juce::Colour (0xffefdfe2); accent = juce::Colour (0xfff2a9bd);
+                accentInk = juce::Colour (0xffcf5a7d); scaleInk = juce::Colour (0xffbd3d66);
+                scoreBlack = juce::Colour (0xff2b1119); scoreDot = juce::Colour (0xfffbe9ee);
+                onAccent = juce::Colour (0xff3b1a26);
                 break;
         }
     }
 
-    // « light » (anciennes sessions) = sun ; tout le reste (dont l'ancien « dark ») = garden.
-    inline Theme fromName (const juce::String& n) { return (n == "sun" || n == "light") ? Theme::sun : Theme::garden; }
-    inline juce::String toName (Theme t)         { return t == Theme::sun ? "sun" : "garden"; }
+    // « sun » / « light » (anciennes sessions) = floral ; tout le reste = garden.
+    inline Theme fromName (const juce::String& n) { return (n == "floral" || n == "sun" || n == "light") ? Theme::floral : Theme::garden; }
+    inline juce::String toName (Theme t)         { return t == Theme::floral ? "floral" : "garden"; }
 }
 
 class FrameLookAndFeel final : public juce::LookAndFeel_V4
@@ -88,16 +91,16 @@ void drawMonoText (juce::Graphics& g, const juce::String& text, juce::Rectangle<
                    float height, juce::Justification just, juce::Colour colour,
                    bool regularWeight = false, float tracking = 0.12f);
 
-/** Icônes de thème (soleil, petit arbre), dessinées au trait fin. */
+/** Icônes de thème (fleur, petit arbre), dessinées au trait fin. */
 void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> area, bool selected);
 
 /** Décor du thème « garden » : grain de papier, aplats de collage végétal,
     brin dessiné au crayon (inspiré des planches de référence). */
 void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page);
 
-/** Décor du thème « sun » : même principe (grain, papiers déchirés dans les
-    marges, petit croquis en haut à gauche), en tons solaires. */
-void drawSunDecor (juce::Graphics& g, juce::Rectangle<float> page);
+/** Décor du thème « floral » : lavis d'aquarelle rose, pétales veinés dans les
+    marges, éclaboussures d'encre rouille, petite fleur au crayon. */
+void drawFloralDecor (juce::Graphics& g, juce::Rectangle<float> page);
 
 /** Ligne de rappel façon planche annotée : étiquette, trait horizontal,
     puis trait vertical jusqu'au point visé. */
