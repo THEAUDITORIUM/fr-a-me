@@ -67,6 +67,52 @@ void ModeToggle::mouseUp (const juce::MouseEvent& e)
 }
 
 //==============================================================================
+//  RetuneToggle
+//==============================================================================
+RetuneToggle::RetuneToggle (juce::RangedAudioParameter& param)
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTitle ("retune");
+    attachment = std::make_unique<juce::ParameterAttachment> (param, [this] (float v)
+    {
+        on = v > 0.5f;
+        repaint();
+    });
+    attachment->sendInitialUpdate();
+}
+
+void RetuneToggle::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat();
+    const float box = juce::jmin (b.getHeight() - 4.0f, 16.0f);
+    const juce::Rectangle<float> sq (b.getX() + 2.0f, b.getCentreY() - box * 0.5f, box, box);
+
+    if (on)
+    {
+        g.setColour (Palette::accent);
+        g.fillRect (sq);
+        // coche fine
+        juce::Path tick;
+        tick.startNewSubPath (sq.getX() + box * 0.22f, sq.getCentreY());
+        tick.lineTo (sq.getX() + box * 0.43f, sq.getBottom() - box * 0.25f);
+        tick.lineTo (sq.getRight() - box * 0.2f, sq.getY() + box * 0.25f);
+        g.setColour (Palette::ink);
+        g.strokePath (tick, juce::PathStrokeType (1.3f));
+    }
+    g.setColour (Palette::ink);
+    g.drawRect (sq, 0.8f);
+
+    drawMonoText (g, "retune", b.withTrimmedLeft (box + 12.0f), 14.0f, juce::Justification::centredLeft,
+                  on ? Palette::ink : Palette::pencil, on);
+}
+
+void RetuneToggle::mouseUp (const juce::MouseEvent& e)
+{
+    if (getLocalBounds().contains (e.getPosition()))
+        attachment->setValueAsCompleteGesture (on ? 0.0f : 1.0f);
+}
+
+//==============================================================================
 //  NoteRow
 //==============================================================================
 NoteRow::NoteRow (juce::RangedAudioParameter& param)

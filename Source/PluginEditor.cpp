@@ -17,6 +17,7 @@
 FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
+      retuneToggle (*p.apvts.getParameter (ParamIDs::retune)),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
 {
     addAndMakeVisible (inputBand);
@@ -30,6 +31,7 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     gainKnob.setMouseDragSensitivity (300);
 
     addAndMakeVisible (modeToggle);
+    addAndMakeVisible (retuneToggle);
     addAndMakeVisible (noteRow);
 
     setSize (designWidth, designHeight);
@@ -62,6 +64,7 @@ void FrameCanvas::resized()
     reverbKnob.setBounds (reverbArea);
     gainKnob.setBounds   (gainArea);
     modeToggle.setBounds (modeArea);
+    retuneToggle.setBounds (retuneArea);
     noteRow.setBounds   (noteArea);
 }
 

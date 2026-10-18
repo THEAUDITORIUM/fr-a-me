@@ -18,6 +18,7 @@ FrameAudioProcessor::FrameAudioProcessor()
     mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
+    retuneParam = apvts.getRawParameterValue (ParamIDs::retune);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
 }
@@ -55,11 +56,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789.").getFloatValue(); })));
 
-    // 4. MODE : major / minor.
+    // 4. RETUNE : case à cocher (désactivée par défaut).
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::retune, 1 }, "retune", false));
+
+    // 5. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
 
-    // 5. NOTE : tonique parmi les 12 notes.
+    // 6. NOTE : tonique parmi les 12 notes.
     StringArray notes;
     for (auto* n : frame::noteNames)
         notes.add (n);
@@ -85,6 +89,9 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
+    retuner.prepare (sampleRate);                      // RETUNE : 0 latence
+    retuner.setScale (getCurrentScaleMask());
+    retuner.reset();
     harmonizer.prepare (sampleRate);                   // traitement harmonique : 0 latence
     harmonizer.setScale (getCurrentScaleMask());
     harmonizer.reset();
@@ -170,6 +177,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         engine.reset();
         harmonizer.reset();
+        retuner.reset();
         reverb.reset();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
@@ -179,6 +187,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     engine.setScaleMask (getCurrentScaleMask());       // (affichage)
     harmonizer.setScale (getCurrentScaleMask());       // gains glissés si la gamme change
+    retuner.setScale (getCurrentScaleMask());          // fondu croisé si la gamme change
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
     mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
 
@@ -217,7 +226,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
-    harmonizer.process (wetView, numChannels, 1.0f);         // 2. peigne + harmoniques justes (0 latence)
+    retuner.process (wetView, numChannels,                   // 2. RETUNE (si coché) : vocodeur sur la gamme
+                     retuneParam->load() > 0.5f ? 1.0f : 0.0f);
+    harmonizer.process (wetView, numChannels, 1.0f);         // 3. peigne + harmoniques justes (0 latence)
    #ifdef FRAME_TEST_SIMULATE_WET_LOSS
     wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
    #endif

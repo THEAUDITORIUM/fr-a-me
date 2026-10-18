@@ -33,6 +33,23 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
+/** Case à cocher « retune » : un petit carré au trait fin (jaune + coche
+    quand activé) suivi du mot, comme une légende de planche. */
+class RetuneToggle final : public juce::Component
+{
+public:
+    explicit RetuneToggle (juce::RangedAudioParameter& param);
+
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    bool isOn() const noexcept { return on; }
+
+private:
+    bool on = false;
+    std::unique_ptr<juce::ParameterAttachment> attachment;
+};
+
 class NoteRow final : public juce::Component
 {
 public:

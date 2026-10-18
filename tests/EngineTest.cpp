@@ -18,6 +18,7 @@
 #include "../Source/Scale.h"
 #include "../Source/AmbientReverb.h"
 #include "../Source/ZeroLatencyHarmonizer.h"
+#include "../Source/RetuneVocoder.h"
 
 #include <cstdio>
 #include <random>
@@ -601,6 +602,56 @@ int main (int argc, char** argv)
             for (int n = (int) sr; n < len - 1; ++n) steady = juce::jmax (steady, std::abs (r.getSample (0, n + 1) - r.getSample (0, n)));
             std::printf ("     changements de gamme : pente max %.4f (gamme fixe : %.4f)\n", maxJump, steady);
             check (maxJump < 2.0f * steady + 0.01f, "changements de gamme sans clic");
+        }
+    }
+
+    // ---- 12. RETUNE : vocodeur sur les notes de la gamme --------------------
+    {
+        std::printf ("12. retune (vocodeur sur la gamme)\n");
+        // a) zéro latence : un clic ressort tout de suite (énergie dans les 3 premières ms)
+        {
+            RetuneVocoder v; v.prepare (sr); v.setScale (aMinor); v.reset();
+            juce::AudioBuffer<float> b (1, 4800); b.clear(); b.setSample (0, 0, 1.0f);
+            v.process (b, 1, 1.0f);
+            double early = 0, total = 0;
+            for (int n = 0; n < 4800; ++n) { const double e = (double) b.getSample (0, n) * b.getSample (0, n); total += e; if (n < (int) (0.003 * sr)) early += e; }
+            int firstAbove = 0; for (int n = 0; n < 4800; ++n) if (std::abs (b.getSample (0, n)) > 1.0e-3f) { firstAbove = n; break; }
+            std::printf ("     clic : sortie dès l'échantillon %d\n", firstAbove);
+            check (firstAbove < 8, "retune sans latence");
+        }
+        // b) un son désaccordé ressort sur les notes de la gamme
+        {
+            RetuneVocoder v; v.prepare (sr); v.setScale (aMinor); v.reset();
+            const int len = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, len);
+            b.clear(); sine (b, 466.16, 0.3f);                     // la#4 : hors la mineur
+            for (int pos = 0; pos < len; pos += 512)
+            {
+                juce::AudioBuffer<float> vv (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
+                v.process (vv, 2, 1.0f);
+            }
+            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
+            const double note = frame::hzToMidi (hz);
+            const double cents = 100.0 * (note - std::round (note));
+            std::printf ("     la#4 (466 Hz) en la mineur -> %.2f Hz (%s, %+.1f cents)\n", hz,
+                         frame::maskContains (aMinor, (int) std::lround (note)) ? "dans la gamme" : "HORS gamme", cents);
+            check (frame::maskContains (aMinor, (int) std::lround (note)) && std::abs (cents) < 3.0, "le son ressort sur une note juste de la gamme");
+        }
+        // c) robustesse : on / off et changements de gamme rapides, bruit fort
+        {
+            RetuneVocoder v; v.prepare (sr);
+            juce::AudioBuffer<float> b (2, 256);
+            std::mt19937 rng (3); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+            bool finite = true; float peak = 0;
+            for (int blk = 0; blk < (int) (10 * sr / 256); ++blk)
+            {
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) b.setSample (c, n, 0.7f * u (rng));
+                v.setScale (frame::scaleMask ((blk / 30) % 12, (blk / 70) % 2 ? frame::Mode::minor : frame::Mode::major));
+                v.process (b, 2, (blk / 50) % 2 ? 1.0f : 0.0f);
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
+            }
+            std::printf ("     on/off + gammes en continu sur bruit fort : crête %.2f\n", peak);
+            check (finite && peak < 4.0f, "retune stable");
         }
     }
 

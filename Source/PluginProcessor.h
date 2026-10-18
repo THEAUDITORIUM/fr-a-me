@@ -12,6 +12,7 @@
 #include "SpectralEngine.h"
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
+#include "RetuneVocoder.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -26,6 +27,7 @@ namespace ParamIDs
     inline constexpr const char* mix   = "mix";
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* gain   = "gain";
+    inline constexpr const char* retune = "retune";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
 }
@@ -96,10 +98,12 @@ private:
     SpectralEngine engine;                // analyse pour l'affichage (ne touche pas au son)
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
+    RetuneVocoder retuner;                // RETUNE (case à cocher) : vocodeur sur les notes de la gamme, 0 latence
 
     std::atomic<float>* mixParam  = nullptr;
     std::atomic<float>* reverbParam = nullptr;
     std::atomic<float>* gainParam = nullptr;
+    std::atomic<float>* retuneParam = nullptr;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGain;
     float reverbSmoothed = 0.3f;          // REVERB lissé de bloc en bloc
     std::atomic<bool> prepared { false }; // prepareToPlay a été appelé

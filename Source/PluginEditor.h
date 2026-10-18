@@ -48,6 +48,7 @@ private:
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
                     const char* paramID);
     ModeToggle modeToggle;
+    RetuneToggle retuneToggle;
     NoteRow noteRow;
 
     uint16_t shownMask = 0;
@@ -60,7 +61,8 @@ private:
     const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };   // petit bouton gain, en haut à droite
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
-    const juce::Rectangle<int>   modeArea     { 430, 656, 170, 36 };
+    const juce::Rectangle<int>   modeArea     { 430, 646, 170, 36 };
+    const juce::Rectangle<int>   retuneArea   { 448, 692, 140, 26 };
     const juce::Rectangle<int>   noteArea     { 630, 648, 290, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)

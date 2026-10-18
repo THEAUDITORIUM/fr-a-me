@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **mix** (0–100 %), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gain** de sortie (−24 … +12 dB, petit bouton en haut à droite), **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **mix** (0–100 %), **retune** (case à cocher, vocodeur sur la gamme), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gain** de sortie (−24 … +12 dB, petit bouton en haut à droite), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -131,7 +131,10 @@ Résultats obtenus pendant le développement (48 kHz) :
 | bruit blanc → résonances, la mineur | la / do / mi ≥ −1.3 dB, hors gamme ≤ −18.5 dB, 81 % de l'énergie sur les notes, niveau conservé |
 | bruit blanc → résonances, mi majeur | mi / sol# / si ≥ −4.1 dB, hors gamme ≤ −19.3 dB, 80 % sur les notes |
 | vos hi-hats, chaîne complète | 90–92 % de l'énergie sur les notes de la gamme, hors gamme −25 à −41 dB, niveau identique |
-| automation brutale REVERB / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| RETUNE : clic | sortie dès l'échantillon 0 (aucune latence) |
+| RETUNE : la#4 en la mineur | ressort à 440.02 Hz (la4, +0.1 cent) |
+| RETUNE vs exemples fournis | bandes à ±2 dB, relief 0.8–0.99, profil harmonique 0.73–0.88 |
+| automation brutale REVERB / GAIN / RETUNE / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -147,6 +150,8 @@ frame/
 │   ├── PluginProcessor.*     paramètres (APVTS), latence, mix dry/wet, état, bypass
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
+│   ├── RetuneVocoder.*       RETUNE : vocodeur sur les notes de la gamme (0 latence)
+│   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
@@ -221,6 +226,19 @@ premier échantillon), FL Studio n'a rien à compenser.
 Le déplacement des notes fausses (vocodeur de phase des versions ≤ 1.8) demande
 obligatoirement une analyse avec retard : il n'est plus utilisé pour le son. Le moteur
 spectral sert désormais uniquement aux visualisations.
+
+**RETUNE** (case à cocher, 2.0) : un vocodeur dont les porteuses sont les notes de la
+gamme, sans latence (filtres + suivi d'enveloppe, comme le Vocodex). Pour chaque note de
+la gamme de mi1 à sol9, une bande d'analyse couvre l'espace jusqu'aux notes voisines :
+toute l'énergie du son est attribuée à la note de la gamme la plus proche, puis
+resynthétisée par un oscillateur exactement accordé — recalage complet, aspect vocodeur.
+Une sélectivité (chaque bande comparée à ses voisines) ne fait sonner que les notes
+réellement jouées. Calé sur les exemples fournis (do# maj, fa# maj, mi min, la min,
+la maj) : bandes à ±2 dB, relief conservé (0.8–0.99), profil harmonique corrélé
+0.73–0.88 ; un la#4 en la mineur ressort à 440.02 Hz. Il se place après la réverbe (la
+queue est retunée aussi) et avant le peigne et les harmoniques de la 1.9, qui
+s'appliquent par-dessus. Coché / décoché : fondu de 30 ms, changement de gamme : fondu
+croisé de 60 ms, sans clic.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
