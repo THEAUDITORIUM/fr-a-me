@@ -133,7 +133,7 @@ void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> r, bool s
 
     switch (t)
     {
-        case Theme::light:      // soleil : disque + 8 rayons
+        case Theme::sun:        // soleil : disque + 8 rayons
         {
             const float rad = s * 0.18f;
             g.drawEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f, lw);
@@ -143,21 +143,6 @@ void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> r, bool s
                 g.drawLine (c.x + std::cos (a) * s * 0.27f, c.y + std::sin (a) * s * 0.27f,
                             c.x + std::cos (a) * s * 0.38f, c.y + std::sin (a) * s * 0.38f, lw);
             }
-            break;
-        }
-        case Theme::dark:       // lune : croissant
-        {
-            juce::Path moon;
-            const float rad = s * 0.30f;
-            moon.addEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f);
-            juce::Path cut;
-            cut.addEllipse (c.x - rad * 0.45f, c.y - rad * 1.15f, rad * 2.0f, rad * 2.0f);
-            moon.setUsingNonZeroWinding (false);
-            moon.addPath (cut);
-            g.saveState();
-            g.reduceClipRegion (moon);                  // croissant = disque privé du second disque
-            g.fillEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f);
-            g.restoreState();
             break;
         }
         case Theme::garden:     // petit arbre : tronc + feuillage au trait
@@ -172,22 +157,10 @@ void drawThemeIcon (juce::Graphics& g, Theme t, juce::Rectangle<float> r, bool s
     }
 }
 
-void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
+namespace
 {
-    // Grain de papier (déterministe : même rendu à chaque image).
-    juce::Random rng (0x6a4d3e);
-    for (int i = 0; i < 2600; ++i)
-    {
-        const float x = page.getX() + rng.nextFloat() * page.getWidth();
-        const float y = page.getY() + rng.nextFloat() * page.getHeight();
-        const bool green = rng.nextFloat() < 0.35f;
-        g.setColour ((green ? juce::Colour (0xff6c8f3a) : juce::Colour (0xff8a8572)).withAlpha (0.05f + 0.07f * rng.nextFloat()));
-        g.fillRect (x, y, 1.0f + rng.nextFloat(), 1.0f);
-    }
-
-    // Aplats de collage végétal (papiers déchirés, verts mousse), discrets,
-    // dans les marges de la planche.
-    auto tornRect = [&rng] (juce::Rectangle<float> r)
+    // Papier déchiré : rectangle aux bords irréguliers.
+    juce::Path tornRect (juce::Rectangle<float> r, juce::Random& rng)
     {
         juce::Path p;
         const int steps = 18;
@@ -199,15 +172,39 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
         for (int i = 1; i <= steps; ++i) p.lineTo (r.getX() + jitter(), r.getBottom() - r.getHeight() * (float) i / steps);
         p.closeSubPath();
         return p;
-    };
-    const juce::Colour mosses[] = { juce::Colour (0xff7f9f4a), juce::Colour (0xff5d7a3a), juce::Colour (0xffb7c98a), juce::Colour (0xff9db86a) };
-    const juce::Rectangle<float> blocks[] = {
+    }
+
+    // Emplacements des papiers collés dans les marges (communs aux deux thèmes).
+    const juce::Rectangle<float> collageBlocks[] = {
         { 14.0f, 120.0f, 46.0f, 150.0f }, { 22.0f, 300.0f, 34.0f, 90.0f }, { 940.0f, 140.0f, 42.0f, 120.0f },
         { 936.0f, 470.0f, 50.0f, 100.0f }, { 18.0f, 470.0f, 40.0f, 70.0f } };
-    int k = 0;
-    for (auto b : blocks)
+
+    void paperGrain (juce::Graphics& g, juce::Rectangle<float> page, juce::Random& rng, juce::Colour tint, juce::Colour neutral)
     {
-        const auto path = tornRect (b);
+        for (int i = 0; i < 2600; ++i)
+        {
+            const float x = page.getX() + rng.nextFloat() * page.getWidth();
+            const float y = page.getY() + rng.nextFloat() * page.getHeight();
+            const bool tinted = rng.nextFloat() < 0.35f;
+            g.setColour ((tinted ? tint : neutral).withAlpha (0.05f + 0.07f * rng.nextFloat()));
+            g.fillRect (x, y, 1.0f + rng.nextFloat(), 1.0f);
+        }
+    }
+}
+
+void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
+{
+    // Grain de papier (déterministe : même rendu à chaque image).
+    juce::Random rng (0x6a4d3e);
+    paperGrain (g, page, rng, juce::Colour (0xff6c8f3a), juce::Colour (0xff8a8572));
+
+    // Aplats de collage végétal (papiers déchirés, verts mousse), discrets,
+    // dans les marges de la planche.
+    const juce::Colour mosses[] = { juce::Colour (0xff7f9f4a), juce::Colour (0xff5d7a3a), juce::Colour (0xffb7c98a), juce::Colour (0xff9db86a) };
+    int k = 0;
+    for (auto b : collageBlocks)
+    {
+        const auto path = tornRect (b, rng);
         g.setColour (mosses[k % 4].withAlpha (0.28f));
         g.fillPath (path);
         // texture d'herbe : petits traits obliques
@@ -242,4 +239,52 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
     leaf (203.0f, 40.0f, -0.5f, 10.0f);
     leaf (209.0f, 31.0f, -2.4f, 9.0f);
     leaf (215.0f, 25.0f, -0.8f, 8.0f);
+}
+
+void drawSunDecor (juce::Graphics& g, juce::Rectangle<float> page)
+{
+    // Même principe que « garden », en tons solaires : grain chaud, papiers
+    // déchirés jaune / ocre dans les marges, petit soleil au crayon.
+    juce::Random rng (0x50a1e7);
+    paperGrain (g, page, rng, juce::Colour (0xffd9b43a), juce::Colour (0xff8a8572));
+
+    const juce::Colour suns[] = { juce::Colour (0xfff0d65a), juce::Colour (0xffe8b84a), juce::Colour (0xfff5e391), juce::Colour (0xffeac66b) };
+    int k = 0;
+    for (auto b : collageBlocks)
+    {
+        const auto path = tornRect (b, rng);
+        g.setColour (suns[k % 4].withAlpha (0.34f));
+        g.fillPath (path);
+        // texture : petits rayons courts et points de lumière
+        g.saveState();
+        g.reduceClipRegion (path);
+        for (int i = 0; i < 70; ++i)
+        {
+            const float x = b.getX() + rng.nextFloat() * b.getWidth();
+            const float y = b.getY() + rng.nextFloat() * b.getHeight();
+            const float a = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+            const float l = 2.0f + rng.nextFloat() * 3.0f;
+            g.setColour (suns[(k + 1 + i) % 4].darker (0.25f).withAlpha (0.40f));
+            if (i % 3 == 0)
+                g.fillEllipse (x - 0.8f, y - 0.8f, 1.6f, 1.6f);
+            else
+                g.drawLine (x, y, x + std::cos (a) * l, y + std::sin (a) * l, 0.7f);
+        }
+        g.restoreState();
+        ++k;
+    }
+
+    // Petit soleil dessiné au crayon, en haut à gauche (à la place du brin).
+    const juce::Point<float> c (206.0f, 42.0f);
+    g.setColour (juce::Colour (0xffc39a22).withAlpha (0.8f));
+    juce::Path disc;
+    disc.addEllipse (c.x - 8.0f, c.y - 8.0f, 16.0f, 16.0f);
+    g.strokePath (disc, juce::PathStrokeType (1.0f));
+    for (int i = 0; i < 12; ++i)
+    {
+        const float a = juce::MathConstants<float>::twoPi * (float) i / 12.0f + 0.1f;
+        const float r0 = 11.5f, r1 = (i % 2 == 0) ? 19.0f : 15.5f;
+        g.drawLine (c.x + std::cos (a) * r0, c.y + std::sin (a) * r0,
+                    c.x + std::cos (a) * r1, c.y + std::sin (a) * r1, 0.9f);
+    }
 }

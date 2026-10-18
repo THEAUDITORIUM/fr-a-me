@@ -30,7 +30,13 @@ int main (int argc, char** argv)
     if (auto* rt = proc.apvts.getParameter (ParamIDs::retune)) rt->setValueNotifyingHost (1.0f);                      // retune coché
     if (auto* pt = proc.apvts.getParameter (ParamIDs::pitch)) pt->setValueNotifyingHost (pt->convertTo0to1 (0.0f));
 
-    if (argc > 3) proc.setTheme (argv[3]);                                   // light / dark / garden
+    // EQ du spectrum (optionnel) : sortie.png largeur thème low_hz high_hz
+    if (argc > 5)
+    {
+        if (auto* lo = proc.apvts.getParameter (ParamIDs::eqLow))  lo->setValueNotifyingHost (lo->convertTo0to1 ((float) juce::String (argv[4]).getDoubleValue()));
+        if (auto* hi = proc.apvts.getParameter (ParamIDs::eqHigh)) hi->setValueNotifyingHost (hi->convertTo0to1 ((float) juce::String (argv[5]).getDoubleValue()));
+    }
+    if (argc > 3) proc.setTheme (argv[3]);                                   // sun / garden
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     editor->setSize (width, (int) std::round (width * 760.0 / 1000.0));
     auto* canvas = dynamic_cast<FrameCanvas*> (editor->getChildComponent (0));

@@ -14,6 +14,7 @@
 #include "ZeroLatencyHarmonizer.h"
 #include "RetuneVocoder.h"
 #include "PitchShifter.h"
+#include "CutEq.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -32,6 +33,8 @@ namespace ParamIDs
     inline constexpr const char* retune = "retune";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
+    inline constexpr const char* eqLow  = "eqLow";    // EQ du spectrum : coupure basse (Hz)
+    inline constexpr const char* eqHigh = "eqHigh";   // EQ du spectrum : coupure haute (Hz)
 }
 
 class FrameAudioProcessor final : public juce::AudioProcessor
@@ -39,7 +42,7 @@ class FrameAudioProcessor final : public juce::AudioProcessor
 public:
     FrameAudioProcessor();
 
-    /** Thème de l'interface (« light », « dark », « garden »), sauvegardé avec le projet. */
+    /** Thème de l'interface (« garden » par défaut, ou « sun »), sauvegardé avec le projet. */
     juce::String getTheme() const;
     void setTheme (const juce::String& theme);
     ~FrameAudioProcessor() override = default;
@@ -106,6 +109,10 @@ private:
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
     RetuneVocoder retuner;                // RETUNE (case à cocher) : vocodeur sur les notes de la gamme, 0 latence
     PitchShifter pitcher;                 // PITCH −12…+12 (elastic), en fin de chaîne
+    CutEq cutEq;                          // EQ isoler / couper (poignées du spectrum), juste avant le limiteur
+    std::atomic<float>* eqLowParam = nullptr;
+    std::atomic<float>* eqHighParam = nullptr;
+    juce::AudioBuffer<float> outBuffer;   // sortie avant EQ + limiteur
 
     std::atomic<float>* harmoParam = nullptr;
     std::atomic<float>* pitchParam = nullptr;

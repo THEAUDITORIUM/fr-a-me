@@ -74,3 +74,37 @@ private:
     bool dragging = false;
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
+
+/** EQ du spectrum (façon Chroma) : deux poignées horizontales posées sur le
+    spectrogramme. Tout ce qui est sous « low » et au-dessus de « high » est
+    coupé (et assombri à l'écran). On tire une poignée pour la déplacer, on
+    tire entre les deux pour faire glisser toute la plage ; double-clic :
+    remise à zéro. La fréquence s'affiche pendant le geste. */
+class EqOverlay final : public juce::Component
+{
+public:
+    EqOverlay (juce::RangedAudioParameter& low, juce::RangedAudioParameter& high);
+
+    void paint (juce::Graphics&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+private:
+    enum class Grab { none, low, high, band };
+
+    float yFor (float hz) const noexcept;
+    float hzFor (float y) const noexcept;
+    Grab hitTestGrab (float y) const noexcept;
+
+    juce::RangedAudioParameter& lowParam;
+    juce::RangedAudioParameter& highParam;
+    std::unique_ptr<juce::ParameterAttachment> lowAttachment, highAttachment;
+    float lowHz = 40.0f, highHz = 12000.0f;
+
+    Grab hover = Grab::none, dragging = Grab::none;
+    float dragStartY = 0.0f, dragStartLowY = 0.0f, dragStartHighY = 0.0f;
+};

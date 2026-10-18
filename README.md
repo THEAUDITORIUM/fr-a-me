@@ -4,12 +4,12 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **harmo** (0–100 %, dose l'harmonie), **retune** (case à cocher, vocodeur robotique façon Vocodex), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **thèmes** light / dark / garden (soleil, lune, arbre), **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **harmo** (0–100 %, dose l'harmonie), **retune** (case à cocher, vocodeur robotique façon Vocodex + phaser, flanger, chorus), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ** du spectrum (deux poignées : couper / isoler une plage de fréquences, façon Chroma), **thèmes** garden (par défaut) / sun, **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
-| light | dark | garden |
-|---|---|---|
-| ![light](docs/interface_light.png) | ![dark](docs/interface_dark.png) | ![garden](docs/interface_garden.png) |
+| garden (par défaut) | sun |
+|---|---|
+| ![garden](docs/interface_garden.png) | ![sun](docs/interface_sun.png) |
 
 ## Télécharger
 
@@ -161,6 +161,8 @@ frame/
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
 │   ├── RetuneVocoder.*       RETUNE : vocodeur robotique sur les notes de la gamme (0 latence)
+│   ├── RetuneFx.*            RETUNE : phaser → flanger → chorus (0 latence)
+│   ├── CutEq.*               EQ du spectrum : coupe bas / haut 24 dB/oct (0 latence)
 │   ├── PitchShifter.*        PITCH : transposition elastic (SOLA)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
@@ -168,7 +170,7 @@ frame/
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
 │   ├── Visualisers.*         bandes input / output / spectrum / partials
-│   ├── Controls.*            bascule major/minor, rangée des 12 notes
+│   ├── Controls.*            bascule major/minor, case retune, rangée des 12 notes, poignées de l'EQ
 │   └── FrameLookAndFeel.*    palette, typographie, potentiomètre
 ├── Resources/fonts/          IBM Plex Mono (licence SIL OFL, voir OFL.txt)
 └── tests/                    banc de test du moteur, capture de l'interface
@@ -238,6 +240,21 @@ Le déplacement des notes fausses (vocodeur de phase des versions ≤ 1.8) deman
 obligatoirement une analyse avec retard : il n'est plus utilisé pour le son. Le moteur
 spectral sert désormais uniquement aux visualisations.
 
+**RETUNE 2.2** : poussé plus loin. Porteuses plus riches (fondamentale + octave +
+douzième, grain plus « machine »), puis une chaîne de modulations intégrée au retune, sans
+latence : **phaser** (6 étages, balayage 180 Hz → 3.4 kHz, gauche / droite en quadrature),
+**flanger** (0.5 → 4.5 ms, rétroaction 0.62, le « jet » métallique, gauche / droite en
+opposition) et **chorus** (3 voix réparties dans l'espace, désaccord ≤ 9 cents : tout reste
+juste). Mesuré sur l'exemple Vocodex : 95 % des partiels justes à ±10 cents (harmo 100 %),
+relief 0.81 (Vocodex : 0.80), le son bouge et s'élargit.
+
+**EQ du spectrum** (2.2, façon Chroma) : deux poignées posées sur le spectrogramme. Tirer
+la poignée haute vers le bas coupe les aigus, la poignée basse vers le haut coupe les
+graves (24 dB/octave) ; tirer entre les deux fait glisser toute la plage pour isoler une
+zone. La fréquence s'affiche pendant le geste, les zones coupées sont voilées et hachurées.
+Double-clic : remise à zéro. En butée (40 Hz / 12 kHz) : aucun filtre. Placé juste avant
+le limiteur de sortie, 0 latence, automatisable (« eq low », « eq high »).
+
 **RETUNE** (case à cocher, refait en 2.1 — façon Vocodex) : vocodeur robotique sans
 latence dont les porteuses sont les notes de la gamme (mi1 → sol9). Aucune note n'est
 retirée : toutes les bandes sonnent, chaque porteuse est « robotique » (fondamentale +
@@ -258,9 +275,10 @@ la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi p
 (type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
 saut de phase. À 0, contourné : son strictement inchangé.
 
-**Thèmes** (en haut à droite) : soleil = light (la planche de base), lune = dark, petit
-arbre = garden (verts mousse, papier chaud, aplats de collage végétal, brin au crayon). Le
-thème est sauvegardé avec le projet.
+**Thèmes** (en haut à droite) : petit arbre = **garden**, le thème au lancement (verts
+mousse, papier chaud, aplats de collage végétal, brin au crayon) ; soleil = **sun** (la
+planche jaune de base, avec le même principe de collage en tons solaires et un petit
+soleil au crayon). Le thème est sauvegardé avec le projet.
 
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
@@ -285,8 +303,8 @@ traité à celle du son d'origine (aligné). Si le traité tombe à plus de 6 dB
 l'original alors que celui-ci joue, le son direct est réinjecté automatiquement (en ~30 ms,
 retrait en ~600 ms) : aucune partie du son ne peut disparaître, quel que soit l'hôte. En
 usage normal il ne s'active jamais (vérifié : 0 bloc actif sur des hi-hats et 60 s de
-musique) ; sur une perte simulée de 30 dB, il rétablit le niveau d'origine. Le pied de
-page affiche la version, les niveaux d'entrée et de sortie, et « direct restored » quand il agit.
+musique) ; sur une perte simulée de 30 dB, il rétablit le niveau d'origine. (Depuis la 2.2,
+le pied de page est retiré : la planche reste épurée.)
 
 **Sécurité** : entrée et sortie assainies (aucune valeur invalide ne peut sortir ni
 contaminer le mixeur de l'hôte), auto-réinitialisation du moteur si besoin, limiteur doux

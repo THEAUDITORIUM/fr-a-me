@@ -33,6 +33,9 @@ namespace
    #ifndef RT_BUZZ
     #define RT_BUZZ 0.45f
    #endif
+   #ifndef RT_BUZZ3
+    #define RT_BUZZ3 0.22f
+   #endif
    #ifndef RT_SPREAD
     #define RT_SPREAD 0.55f
    #endif
@@ -40,6 +43,7 @@ namespace
     constexpr float highTiltDb = RT_TILT;   // aigus en retrait au-dessus de 2 kHz
     constexpr float keepOriginal = RT_KEEP; // part du son d'origine gardée (variations, glissés, textures)
     constexpr float buzz = RT_BUZZ;         // timbre robotique : octave ajoutée à chaque porteuse
+    constexpr float buzz3 = RT_BUZZ3;       // et douzième (×3) : grain plus « machine »
     constexpr float stereoSpread = RT_SPREAD; // bandes alternées gauche / droite (largeur Vocodex)
    #ifndef RT_ANGLE
     #define RT_ANGLE 1.05
@@ -57,6 +61,7 @@ void RetuneVocoder::prepare (double newSampleRate)
     expansion = RT_EXP;
     levelCoef = 1.0f - std::exp (-1.0f / (0.3f  * (float) sampleRate));
     levelUp   = 1.0f - std::exp (-1.0f / (0.05f * (float) sampleRate));
+    fx.prepare (sampleRate);
 
     const uint16_t m = mask;
     hasBank = false;
@@ -76,6 +81,7 @@ void RetuneVocoder::reset() noexcept
             b.env[0] = b.env[1] = 0.0f;
         }
     crossfade = 1.0f;
+    fx.reset();
     eIn = eVoc = 0.0f;
     levelGain = 1.0f;
 }
@@ -156,6 +162,8 @@ void RetuneVocoder::buildBank (Bank& bank, uint16_t m) noexcept
         b.cosNow = std::cos (b.phase);
         b.sin2Now = std::sin (2.0 * b.phase);
         b.cos2Now = std::cos (2.0 * b.phase);
+        b.sin3Now = std::sin (3.0 * b.phase);
+        b.cos3Now = std::cos (3.0 * b.phase);
 
         // Inclinaison douce dans l'aigu (au-dessus de 2 kHz).
         const double octAbove2k = juce::jmax (0.0, std::log2 (hz / 2000.0));
@@ -166,6 +174,7 @@ void RetuneVocoder::buildBank (Bank& bank, uint16_t m) noexcept
         b.panL = std::sqrt (0.5f * (1.0f - side)) * 1.41421356f;
         b.panR = std::sqrt (0.5f * (1.0f + side)) * 1.41421356f;
         b.buzzOk = hz * 2.0 < nyq;
+        b.buzz3Ok = hz * 3.0 < nyq;
     }
 }
 
@@ -215,10 +224,12 @@ void RetuneVocoder::runBank (Bank& bank, const double* in, int nch, double* out)
             // Canal droit : même note, phase décalée de ~60° → gauche et droite
             // partiellement décorrélés (largeur façon Vocodex, sans désaccord,
             // et sans perte en mono).
-            const double f1 = b.sinNow + (b.buzzOk ? (double) buzz * b.sin2Now : 0.0);
+            const double f1 = b.sinNow + (b.buzzOk ? (double) buzz * b.sin2Now : 0.0)
+                                       + (b.buzz3Ok ? (double) buzz3 * b.sin3Now : 0.0);
             const double carrier = (c == 0 || nch < 2)
                                  ? f1
-                                 : stereoCos * f1 + stereoSin * (b.cosNow + (b.buzzOk ? (double) buzz * b.cos2Now : 0.0));
+                                 : stereoCos * f1 + stereoSin * (b.cosNow + (b.buzzOk ? (double) buzz * b.cos2Now : 0.0)
+                                                                         + (b.buzz3Ok ? (double) buzz3 * b.cos3Now : 0.0));
             const float pan = nch > 1 ? (c == 0 ? b.panL : b.panR) : 1.0f;
             acc += (double) (bank.shaped[(size_t) i] * b.gain * pan) * carrier;
         }
@@ -235,6 +246,8 @@ void RetuneVocoder::runBank (Bank& bank, const double* in, int nch, double* out)
         b.cosNow = std::cos (b.phase);
         b.sin2Now = 2.0 * b.sinNow * b.cosNow;                 // sin(2φ)
         b.cos2Now = 1.0 - 2.0 * b.sinNow * b.sinNow;           // cos(2φ)
+        b.sin3Now = b.sinNow * (3.0 - 4.0 * b.sinNow * b.sinNow);   // sin(3φ)
+        b.cos3Now = b.cosNow * (4.0 * b.cosNow * b.cosNow - 3.0);   // cos(3φ)
     }
 }
 
@@ -251,6 +264,8 @@ void RetuneVocoder::process (juce::AudioBuffer<float>& buffer, int numChannels, 
     // Rien à faire (retune coupé et fondu terminé) : on ne touche pas au son.
     if (amount <= 0.0f && amountSmoothed < 1.0e-4f)
     {
+        if (amountSmoothed > 0.0f)
+            fx.reset();                       // les modulations repartiront d'un état propre
         amountSmoothed = 0.0f;
         return;
     }
@@ -279,6 +294,13 @@ void RetuneVocoder::process (juce::AudioBuffer<float>& buffer, int numChannels, 
             // Nappe vocodée + une part du son d'origine : aucune partie du
             // sample n'est perdue (glissés, textures, attaques restent là).
             voc[c] = wetOld[c] * (1.0 - xf) + wetNew[c] * xf + (double) keepOriginal * in[c];
+        }
+
+        // Modulations du retune : phaser → flanger → chorus (0 latence).
+        fx.processFrame (voc[0], voc[1], nch < 2);
+
+        for (int c = 0; c < nch; ++c)
+        {
             inE  += (float) (in[c] * in[c]);
             vocE += (float) (voc[c] * voc[c]);
         }

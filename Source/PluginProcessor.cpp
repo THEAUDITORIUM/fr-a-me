@@ -22,6 +22,8 @@ FrameAudioProcessor::FrameAudioProcessor()
     retuneParam = apvts.getRawParameterValue (ParamIDs::retune);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
+    eqLowParam  = apvts.getRawParameterValue (ParamIDs::eqLow);
+    eqHighParam = apvts.getRawParameterValue (ParamIDs::eqHigh);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createParameterLayout()
@@ -82,6 +84,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::note, 1 }, "note", notes, 0));
 
+    // 7. EQ du spectrum (façon Chroma) : plage gardée [eq low, eq high].
+    //    En butée (40 Hz / 12 kHz) = aucun filtre.
+    auto hzRange = [] (float def)
+    {
+        NormalisableRange<float> r (CutEq::minHz, CutEq::maxHz,
+            [] (float lo, float hi, float t) { return lo * std::pow (hi / lo, t); },
+            [] (float lo, float hi, float v) { return std::log (v / lo) / std::log (hi / lo); },
+            [] (float lo, float hi, float v) { return jlimit (lo, hi, v); });
+        ignoreUnused (def);
+        return r;
+    };
+    auto hzText = AudioParameterFloatAttributes()
+        .withLabel ("Hz")
+        .withStringFromValueFunction ([] (float v, int) { return v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (roundToInt (v)) + " Hz"; })
+        .withValueFromStringFunction ([] (const String& s) { const float v = s.retainCharacters ("0123456789.").getFloatValue(); return s.containsIgnoreCase ("k") ? v * 1000.0f : v; });
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqLow, 1 },  "eq low",  hzRange (CutEq::minHz), CutEq::minHz, hzText));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqHigh, 1 }, "eq high", hzRange (CutEq::maxHz), CutEq::maxHz, hzText));
+
     return layout;
 }
 
@@ -122,6 +142,8 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
     preHarmoBuffer.setSize (2, maxChunk, false, true, false);
     pitcher.prepare (sampleRate);
+    cutEq.prepare (sampleRate);
+    outBuffer.setSize (2, maxChunk, false, true, false);
 
     engine.setScaleMask (getCurrentScaleMask());
     samplesPerWaveSlice = engine.getFftSize() / 8;     // l'onde défile à la même vitesse que le spectrogramme
@@ -193,6 +215,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         harmonizer.reset();
         retuner.reset();
         pitcher.reset();
+        cutEq.reset();
         reverb.reset();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
@@ -275,19 +298,14 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
     bool invalid = false;
 
+    // 5a. Garde-fou + gain de sortie → outBuffer.
     for (int i = 0; i < numSamples; ++i)
     {
         const float og = outputGain.getNextValue();
-
-        float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
-        float outFrame[2] = { 0.0f, 0.0f };
-
         for (int c = 0; c < numChannels; ++c)
         {
-            const float x = dryBuffer.getSample (c, i);
-
             // Zéro latence : le son d'origine et le son traité sont alignés tels quels.
-            const float delayed = x;
+            const float delayed = dryBuffer.getSample (c, i);
 
             // Garde-fou « tout le son passe » : si le chemin traité a perdu une
             // grande partie du son d'origine, le son direct est réinjecté.
@@ -298,28 +316,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             guardDry += (delayed * delayed - guardDry) * guardCoef;
             guardWet += (rawWet * rawWet - guardWet) * guardCoef;
 
-            outFrame[c] = wet * og;          // chaque module est dosé par son propre bouton
-
-            inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
-        }
-
-        // Limiteur de sortie lié en stéréo : attaque immédiate, relâchement
-        // ~120 ms, plafond −0.5 dBFS. Le gain varie en douceur : pas
-        // d'écrêtage, donc pas de grésillement. Le tanh de sécurité ne sert
-        // plus qu'aux crêtes extrêmes.
-        float peak = 0.0f;
-        for (int c = 0; c < numChannels; ++c)
-            peak = juce::jmax (peak, std::abs (outFrame[c]));
-        constexpr float ceiling = 0.944f;                     // −0.5 dBFS
-        const float needed = peak > ceiling ? ceiling / peak : 1.0f;
-        limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
-        if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
-
-        for (int c = 0; c < numChannels; ++c)
-        {
-            const float y = safetyLimit (outFrame[c] * limiterGain, invalid);
-            buffer.setSample (c, startSample + i, y);
-            outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
+            outBuffer.setSample (c, i, wet * og);   // chaque module est dosé par son propre bouton
         }
 
         // Mise à jour du garde-fou, une fois par paquet de 32 échantillons.
@@ -337,6 +334,40 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             directRestore += (target - directRestore) * k;
             if (! std::isfinite (directRestore) || directRestore < 1.0e-4f) directRestore = target > 0.0f ? directRestore : 0.0f;
             if (! std::isfinite (guardDry) || ! std::isfinite (guardWet)) { guardDry = guardWet = 0.0f; directRestore = 0.0f; }
+        }
+    }
+
+    // 5b. EQ du spectrum (isoler / couper) : après le garde-fou, qui ne
+    //     « répare » donc pas une coupure voulue.
+    cutEq.process (outBuffer.getArrayOfWritePointers(), numChannels, numSamples,
+                   eqLowParam->load(), eqHighParam->load());
+
+    // 5c. Limiteur de sortie, vu-mètres, tranches de forme d'onde.
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const float x = dryBuffer.getSample (c, i);
+            inLo = juce::jmin (inLo, x);  inHi = juce::jmax (inHi, x);
+        }
+
+        // Limiteur lié en stéréo : attaque immédiate, relâchement ~120 ms,
+        // plafond −0.5 dBFS. Le gain varie en douceur : pas d'écrêtage, donc
+        // pas de grésillement. Le tanh de sécurité ne sert qu'aux crêtes extrêmes.
+        float peak = 0.0f;
+        for (int c = 0; c < numChannels; ++c)
+            peak = juce::jmax (peak, std::abs (outBuffer.getSample (c, i)));
+        constexpr float ceiling = 0.944f;                     // −0.5 dBFS
+        const float needed = peak > ceiling ? ceiling / peak : 1.0f;
+        limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
+        if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
+
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid);
+            buffer.setSample (c, startSample + i, y);
+            outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
         }
 
         meterIn  += (inHi - inLo  - meterIn)  * meterCoef;
@@ -376,8 +407,10 @@ void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer
 //==============================================================================
 juce::String FrameAudioProcessor::getTheme() const
 {
-    const auto t = apvts.state.getProperty ("theme", "light").toString();
-    return (t == "dark" || t == "garden") ? t : juce::String ("light");
+    // Thème par défaut : garden. « light » (sessions 2.1) devient « sun » ;
+    // l'ancien « dark » (retiré) devient garden.
+    const auto t = apvts.state.getProperty ("theme", "garden").toString();
+    return (t == "sun" || t == "light") ? juce::String ("sun") : juce::String ("garden");
 }
 
 void FrameAudioProcessor::setTheme (const juce::String& theme)

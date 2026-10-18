@@ -2,7 +2,11 @@
   ==============================================================================
     fr(a)me — RetuneVocoder.h
 
-    RETUNE (2.1) : vocodeur robotique façon Vocodex, dont les porteuses sont
+    RETUNE (2.2) : vocodeur robotique façon Vocodex, porteuses plus riches
+    (fondamentale + octave + douzième), suivi d'une chaîne de modulations
+    phaser → flanger → chorus (RetuneFx), le tout 0 latence.
+
+    (2.1) vocodeur robotique façon Vocodex, dont les porteuses sont
     les notes de la gamme. 0 latence (filtres IIR + suivi d'enveloppe causal).
     Aucune note n'est retirée : toutes les bandes sonnent (sélectivité douce),
     chaque porteuse est « robotique » (fondamentale + octave), les bandes sont
@@ -33,6 +37,7 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include "RetuneFx.h"
 #include <array>
 #include <cstdint>
 
@@ -74,10 +79,11 @@ private:
         double cosW = 1.0, sinW = 1.0; // pour la composante en quadrature
         double prev[2] {};
         float env[2] {};
-        double phase = 0.0, phaseInc = 0.0, sinNow = 0.0, sin2Now = 0.0, cosNow = 1.0, cos2Now = 1.0;
+        double phase = 0.0, phaseInc = 0.0, sinNow = 0.0, sin2Now = 0.0, cosNow = 1.0, cos2Now = 1.0, sin3Now = 0.0, cos3Now = 1.0;
         float gain = 1.0f;             // gain de sortie (inclinaison + normalisation)
         float panL = 1.0f, panR = 1.0f;// position stéréo de la bande
         bool  buzzOk = true;           // l'octave de la porteuse reste sous Nyquist
+        bool  buzz3Ok = true;          // la douzième (×3) aussi
     };
 
     struct Bank
@@ -97,6 +103,7 @@ private:
     uint16_t mask = 0;
     bool hasBank = false;
 
+    RetuneFx fx;                                     // phaser → flanger → chorus (2.2)
     float envAttack = 0.5f, envRelease = 0.01f;
     float expansion = 2.0f;                          // sélectivité (notes jouées vs fond)
     float amountSmoothed = 0.0f, amountCoef = 0.001f;

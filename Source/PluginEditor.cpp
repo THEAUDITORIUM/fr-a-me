@@ -7,15 +7,12 @@
 #include "PluginEditor.h"
 #include "Scale.h"
 
-#ifndef JucePlugin_VersionString
- #define JucePlugin_VersionString "dev"
-#endif
-
 //==============================================================================
 //  FrameCanvas
 //==============================================================================
 FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
+      eqOverlay  (*p.apvts.getParameter (ParamIDs::eqLow), *p.apvts.getParameter (ParamIDs::eqHigh)),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
       retuneToggle (*p.apvts.getParameter (ParamIDs::retune)),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
@@ -26,6 +23,7 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     addAndMakeVisible (inputBand);
     addAndMakeVisible (outputBand);
     addAndMakeVisible (spectrumBand);
+    addAndMakeVisible (eqOverlay);
     addAndMakeVisible (partialBand);
 
     setupKnob (harmoKnob,  "harmo",  100.0, knobArea,   harmoAttachment,  ParamIDs::harmo);
@@ -64,6 +62,7 @@ void FrameCanvas::resized()
     inputBand.setBounds    (inputArea.toNearestInt());
     outputBand.setBounds   (outputArea.toNearestInt());
     spectrumBand.setBounds (spectrumArea.toNearestInt());
+    eqOverlay.setBounds    (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     harmoKnob.setBounds  (knobArea);
     pitchKnob.setBounds  (pitchArea);
@@ -87,7 +86,7 @@ void FrameCanvas::applyTheme (Theme t)
 
 void FrameCanvas::mouseUp (const juce::MouseEvent& e)
 {
-    for (auto t : { Theme::light, Theme::dark, Theme::garden })
+    for (auto t : { Theme::sun, Theme::garden })
         if (themeIconArea (t).expanded (3.0f).contains (e.position) && t != Palette::current)
         {
             applyTheme (t);
@@ -98,7 +97,7 @@ void FrameCanvas::mouseUp (const juce::MouseEvent& e)
 void FrameCanvas::mouseMove (const juce::MouseEvent& e)
 {
     bool over = false;
-    for (auto t : { Theme::light, Theme::dark, Theme::garden })
+    for (auto t : { Theme::sun, Theme::garden })
         over = over || themeIconArea (t).expanded (3.0f).contains (e.position);
     setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
 }
@@ -135,7 +134,6 @@ void FrameCanvas::refresh()
 
     inputBand.repaint();
     outputBand.repaint();
-    repaint (juce::Rectangle<int> (0, 730, designWidth, 22));   // pied de page : niveaux
     spectrumBand.repaint();
     partialBand.repaint();
 }
@@ -147,6 +145,8 @@ void FrameCanvas::paint (juce::Graphics& g)
     g.fillAll (Palette::paper);
     if (Palette::current == Theme::garden)
         drawGardenDecor (g, getLocalBounds().toFloat());
+    else
+        drawSunDecor (g, getLocalBounds().toFloat());
 
     const float left = inputArea.getX(), right = inputArea.getRight();
 
@@ -154,8 +154,8 @@ void FrameCanvas::paint (juce::Graphics& g)
     drawMonoText (g, "fr(a)me", { 0.0f, 16.0f, (float) designWidth, 34.0f }, 28.0f, J::centred, Palette::ink, true, 0.28f);
     drawMonoText (g, "( spectral harmoniser )", { 0.0f, 50.0f, (float) designWidth, 16.0f }, 11.0f, J::centred, Palette::graphite);
     drawMonoText (g, "plate 01", { left, 22.0f, 200.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil);
-    // Thèmes : soleil (light), lune (dark), petit arbre (garden).
-    for (auto t : { Theme::light, Theme::dark, Theme::garden })
+    // Thèmes : soleil (sun), petit arbre (garden).
+    for (auto t : { Theme::sun, Theme::garden })
         drawThemeIcon (g, t, themeIconArea (t), t == Palette::current);
     drawMonoText (g, Palette::toName (Palette::current), { 684.0f, 46.0f, 96.0f, 12.0f }, 8.5f, J::centred, Palette::graphite);
 
@@ -251,27 +251,6 @@ void FrameCanvas::paint (juce::Graphics& g)
     drawMonoText (g, juce::String (juce::roundToInt (reverbKnob.getValue())) + " %",
                   { reverbC.x - 55.0f, (float) reverbArea.getBottom() + 2.0f, 110.0f, 16.0f },
                   12.0f, J::centred, Palette::ink, true);
-
-
-
-    // ---- Pied de page : récapitulatif « rapport scientifique » ----------------
-    const int note = juce::jlimit (0, 11, noteRow.getNote());
-    const juce::String scaleName = juce::String (frame::noteNames[note]) + (modeToggle.getMode() == 0 ? " major" : " minor");
-    const int latency = processor.getLatencyInSamples();
-    const double sr = processor.getCurrentSampleRate();
-
-    g.setColour (Palette::faint);
-    g.drawHorizontalLine (728, left, right);
-    drawMonoText (g, "scale : " + scaleName, { left, 734.0f, 300.0f, 14.0f }, 9.5f, J::centredLeft, Palette::graphite);
-    // Version + niveaux d'entrée / sortie (et garde-fou s'il agit).
-    juce::String centre = "v" JucePlugin_VersionString "   in " + juce::String (processor.getInputLevelDb(), 1)
-                        + " db   out " + juce::String (processor.getOutputLevelDb(), 1) + " db";
-    if (processor.isDirectRestoreActive())
-        centre << "   direct restored";
-    drawMonoText (g, centre, { 0.0f, 734.0f, (float) designWidth, 14.0f }, 9.5f, J::centred,
-                  processor.isDirectRestoreActive() ? Palette::ink : Palette::graphite);
-    drawMonoText (g, "latency : " + juce::String (latency) + " smp  (" + juce::String (1000.0 * latency / sr, 1) + " ms)",
-                  { right - 300.0f, 734.0f, 300.0f, 14.0f }, 9.5f, J::centredRight, Palette::graphite);
 }
 
 void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)

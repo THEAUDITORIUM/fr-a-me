@@ -47,6 +47,7 @@ private:
     WaveBand inputBand  { WaveBand::Source::input };
     WaveBand outputBand { WaveBand::Source::output };
     SpectrogramBand spectrumBand;
+    EqOverlay eqOverlay;                  // poignées de l'EQ posées sur le spectrum
     PartialScore partialBand;
 
     juce::Slider harmoKnob, reverbKnob, gainKnob, pitchKnob;
@@ -70,7 +71,7 @@ private:
     const juce::Rectangle<int>   pitchArea    { 812, 12, 40, 40 };   // petit bouton pitch, à côté de gain
     juce::Rectangle<float> themeIconArea (Theme t) const
     {
-        return { 690.0f + 30.0f * (float) (int) t, 20.0f, 24.0f, 24.0f };   // soleil, lune, arbre
+        return { 702.0f + 36.0f * (float) (int) t, 20.0f, 24.0f, 24.0f };   // soleil (sun), petit arbre (garden)
     }
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
