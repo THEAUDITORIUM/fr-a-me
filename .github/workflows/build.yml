@@ -1,10 +1,12 @@
 # ==============================================================================
 #  fr(a)me — compilation et installeurs
 #
-#  À chaque push sur main (ou tag vX.Y.Z) : compile macOS, lance les
+#  À chaque push sur main (ou tag vX.Y.Z) : compile macOS + Windows, lance les
 #  tests du moteur, puis publie / met à jour la release « vX.Y.Z » (X.Y.Z = la
 #  VERSION de CMakeLists.txt ou du tag) avec les fichiers :
 #                               frame-X.Y.Z-macos.pkg
+#                               frame-X.Y.Z-windows-setup.exe
+#                               frame-X.Y.Z-windows.zip
 # ==============================================================================
 name: build
 
@@ -99,9 +101,63 @@ jobs:
           if-no-files-found: error
 
   # ----------------------------------------------------------------------------
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurer (Visual Studio 2022, x64)
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Compiler
+        run: cmake --build build --config Release --parallel
+
+      - name: Installer Inno Setup si absent
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Construire l'installeur (.exe) et le zip
+        shell: pwsh
+        run: |
+          $art = Resolve-Path "build\Frame_artefacts\Release"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $dist = Resolve-Path dist
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+              "/DAppVersion=$env:VERSION" "/DArtefacts=$art" "/DOutputDir=$dist" `
+              installer\windows\frame.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Zip « portable » : VST3 + standalone + mode d'emploi.
+          $z = "dist\zip\frame-$env:VERSION-windows"
+          New-Item -ItemType Directory -Force $z | Out-Null
+          Copy-Item -Recurse "$art\VST3\frame.vst3" $z
+          Copy-Item "$art\Standalone\frame.exe" $z
+          Set-Content -Encoding utf8 "$z\LISEZMOI.txt" @"
+          fr(a)me $env:VERSION
+          - Copiez le dossier frame.vst3 dans C:\Program Files\Common Files\VST3\
+          - frame.exe est la version autonome (standalone).
+          "@
+          Compress-Archive -Path "$z\*" -DestinationPath "dist\frame-$env:VERSION-windows.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-${{ env.VERSION }}-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
   release:
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [version, macos]
+    needs: [version, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -118,11 +174,14 @@ jobs:
           name: fr(a)me ${{ needs.version.outputs.version }}
           files: dist/*
           body: |
-            **fr(a)me ${{ needs.version.outputs.version }}** — harmoniseur spectral pour macOS (VST3 · AU · Standalone)
+            **fr(a)me ${{ needs.version.outputs.version }}** — harmoniseur spectral pour macOS et Windows (VST3 · AU · Standalone)
 
             | système | fichier |
             |---|---|
             | macOS 11+ (Apple Silicon & Intel) | `frame-${{ needs.version.outputs.version }}-macos.pkg` |
+            | Windows 10/11 64 bits — installeur | `frame-${{ needs.version.outputs.version }}-windows-setup.exe` |
+            | Windows — portable | `frame-${{ needs.version.outputs.version }}-windows.zip` |
 
-            L'installeur n'est pas signé par un certificat développeur : clic droit sur le .pkg ▸ *Ouvrir*
-            (ou Réglages Système ▸ Confidentialité et sécurité ▸ *Ouvrir quand même*).
+            Les installeurs ne sont pas signés par un certificat développeur :
+            - **macOS** : clic droit sur le .pkg ▸ *Ouvrir* (ou Réglages Système ▸ Confidentialité et sécurité ▸ *Ouvrir quand même*).
+            - **Windows** : à l'avertissement SmartScreen, *Informations complémentaires* ▸ *Exécuter quand même*.
