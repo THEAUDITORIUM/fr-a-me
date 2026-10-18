@@ -41,8 +41,8 @@ private:
     SpectrogramBand spectrumBand;
     PartialScore partialBand;
 
-    juce::Slider mixKnob, reverbKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, reverbAttachment;
+    juce::Slider mixKnob, reverbKnob, gainKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment, reverbAttachment, gainAttachment;
 
     void setupKnob (juce::Slider& knob, const juce::String& name, double resetValue,
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
@@ -57,6 +57,7 @@ private:
     const juce::Rectangle<float> outputArea   { 80.0f, 214.0f, 840.0f,  70.0f };
     const juce::Rectangle<float> spectrumArea { 80.0f, 310.0f, 840.0f, 140.0f };
     const juce::Rectangle<float> partialArea  { 80.0f, 476.0f, 840.0f, 100.0f };
+    const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };   // petit bouton gain, en haut à droite
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
     const juce::Rectangle<int>   modeArea     { 430, 656, 170, 36 };

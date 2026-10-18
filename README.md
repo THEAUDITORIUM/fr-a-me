@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui recale en temps réel chaque
 hors tonalité sur la note la plus proche de la gamme choisie, sans resynthèse : timbre,
 transitoires et texture d'origine sont conservés, seule l'harmonie est corrigée.
 
-Quatre contrôles : **mix** (0–100 %), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **mix** (0–100 %), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gain** de sortie (−24 … +12 dB, petit bouton en haut à droite), **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 ![interface](docs/interface.png)
@@ -128,7 +128,10 @@ Résultats obtenus pendant le développement (48 kHz) :
 | bruit blanc (la mineur) | notes +6 dB, entre les notes −11 dB, niveau global −0.6 dB |
 | salve de bruit, REVERB 70 % puis moteur | queue dans la gamme à 96 %, corrélation G/D 0.07, −39 dB à 1 s → −77 dB à 6 s |
 | REVERB 100 % sur 40 s de bruit continu | niveau stable (pas d'emballement du nuage réinjecté) |
-| automation brutale REVERB / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| bruit blanc → résonances, la mineur | la / do / mi ≥ −1.3 dB, hors gamme ≤ −18.5 dB, 81 % de l'énergie sur les notes, niveau conservé |
+| bruit blanc → résonances, mi majeur | mi / sol# / si ≥ −4.1 dB, hors gamme ≤ −19.3 dB, 80 % sur les notes |
+| vos hi-hats, chaîne complète | 90–92 % de l'énergie sur les notes de la gamme, hors gamme −25 à −41 dB, niveau identique |
+| automation brutale REVERB / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -144,6 +147,7 @@ frame/
 │   ├── PluginProcessor.*     paramètres (APVTS), latence, mix dry/wet, état, bypass
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
+│   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
@@ -207,6 +211,17 @@ COLOR étant figé à 100 %).** Deux couches, appliquées à chaque note recalé
 - *Peigne harmonique* : +5.5 dB sur les fréquences des notes de la gamme, −8 dB entre
   elles (250 Hz – 12 kHz, niveau global compensé), y compris sur le bruit et les transitoires.
 
+**Résonances harmoniques (toujours actives).** Comme des cloches Pro-Q à +30 dB très
+étroites posées sur chaque note de la gamme, mais automatiques : une banque de
+résonateurs passe-bande (double précision) sur toutes les notes de la gamme de mi1 à mi8,
+temps de résonance 0.1–0.4 s. Même un clap, un hi-hat ou du souffle se met à chanter.
+Elles sont **cohérentes avec la gamme choisie** : chaque note est pondérée selon son degré —
+l'accord de la tonalité domine (tonique 1.0, quinte 0.9, tierce 0.85, mineure en mineur et
+majeure en majeur), puis sixte, quarte, septième, seconde ; les notes hors gamme ne
+résonnent jamais. En la mineur, la / do / mi dominent ; en mi majeur, mi / sol# / si. La
+part des résonances est bornée à ~+8 dB au-dessus du son entrant (le son d'origine reste
+toujours présent) et le volume global est compensé.
+
 **REVERB** (0–100 %) : vraie réverbe ambient — réseau de 8 lignes à retard en feedback
 (matrice de Hadamard), longueurs modulées lentement (queue vivante, pas métallique), aigus
 amortis, pré-délai, T60 de 1.5 s à 12 s. Un **nuage granulaire** vit *dans* la réverbe :
@@ -250,7 +265,7 @@ environ 2.5 % d'un cœur en stéréo à 48 kHz (build Release).
 ## 5. L'interface
 
 Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à l'échelle
-(redimensionnez par le coin inférieur droit, proportions conservées).
+(720 px de large par défaut ; redimensionnez par le coin inférieur droit, de 520 à 1500 px).
 
 - **input** : forme d'onde noire du signal entrant ;
 - **output** : forme d'onde jaune du signal traité ;
@@ -259,7 +274,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   à gauche, la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   jaune si le pic a été recalé ;
-- **mix** (double-clic = 100 %), **reverb** (double-clic = 30 %), **mode** (clic sur le mot), **tonic** (clic ou glisser
+- **mix** (double-clic = 100 %), **reverb** (double-clic = 30 %), **gain** (double-clic = 0 dB), **mode** (clic sur le mot), **tonic** (clic ou glisser
   le long de la rangée ; un point marque chaque note de la gamme).
 
 Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).

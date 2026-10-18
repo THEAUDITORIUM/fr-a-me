@@ -26,6 +26,8 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
 
     setupKnob (mixKnob,    "mix",    100.0, knobArea,   mixAttachment,    ParamIDs::mix);
     setupKnob (reverbKnob, "reverb",  30.0, reverbArea, reverbAttachment, ParamIDs::reverb);
+    setupKnob (gainKnob,   "gain",     0.0, gainArea,   gainAttachment,   ParamIDs::gain);
+    gainKnob.setMouseDragSensitivity (300);
 
     addAndMakeVisible (modeToggle);
     addAndMakeVisible (noteRow);
@@ -58,6 +60,7 @@ void FrameCanvas::resized()
     partialBand.setBounds  (partialArea.toNearestInt());
     mixKnob.setBounds    (knobArea);
     reverbKnob.setBounds (reverbArea);
+    gainKnob.setBounds   (gainArea);
     modeToggle.setBounds (modeArea);
     noteRow.setBounds   (noteArea);
 }
@@ -111,7 +114,14 @@ void FrameCanvas::paint (juce::Graphics& g)
     drawMonoText (g, "fr(a)me", { 0.0f, 16.0f, (float) designWidth, 34.0f }, 28.0f, J::centred, Palette::ink, true, 0.28f);
     drawMonoText (g, "( spectral harmoniser )", { 0.0f, 50.0f, (float) designWidth, 16.0f }, 11.0f, J::centred, Palette::graphite);
     drawMonoText (g, "plate 01", { left, 22.0f, 200.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil);
-    drawMonoText (g, "a4 = 440 hz", { right - 200.0f, 22.0f, 200.0f, 14.0f }, 10.0f, J::centredRight, Palette::pencil);
+    // Petit bouton gain (en haut à droite) : étiquette à gauche, valeur dessous.
+    {
+        const auto gr = gainArea.toFloat();
+        const float gv = (float) gainKnob.getValue();
+        drawMonoText (g, "gain", { gr.getX() - 64.0f, gr.getCentreY() - 7.0f, 56.0f, 14.0f }, 10.0f, J::centredRight, Palette::ink);
+        drawMonoText (g, (gv > 0.05f ? "+" : "") + juce::String (gv, 1) + " db",
+                      { gr.getCentreX() - 40.0f, gr.getBottom() + 1.0f, 80.0f, 12.0f }, 8.5f, J::centred, Palette::graphite);
+    }
 
     drawTimeAxis (g, { left, 92.0f, right - left, 1.0f });
 
@@ -273,8 +283,8 @@ FrameAudioProcessorEditor::FrameAudioProcessorEditor (FrameAudioProcessor& p)
     setResizable (true, true);
     const double ratio = (double) FrameCanvas::designWidth / FrameCanvas::designHeight;
     getConstrainer()->setFixedAspectRatio (ratio);
-    setResizeLimits (650, (int) (650 / ratio), 1700, (int) (1700 / ratio));
-    setSize (920, (int) (920 / ratio));
+    setResizeLimits (520, (int) (520 / ratio), 1500, (int) (1500 / ratio));
+    setSize (720, (int) (720 / ratio));          // fenêtre plus compacte par défaut
 
     startTimerHz (30);
 }

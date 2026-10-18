@@ -17,6 +17,7 @@
 #include "../Source/SpectralEngine.h"
 #include "../Source/Scale.h"
 #include "../Source/AmbientReverb.h"
+#include "../Source/HarmonicResonator.h"
 
 #include <cstdio>
 #include <random>
@@ -500,6 +501,61 @@ int main (int argc, char** argv)
             for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) finite &= std::isfinite (b.getSample (c, n));
         }
         check (finite, "aucune valeur invalide sous automation brutale");
+    }
+
+    // ---- 11. Résonances harmoniques : cohérence avec la gamme -----------------
+    {
+        const char* nm[12] = { "c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b" };
+        struct Key { int tonic; frame::Mode mode; const char* name; int third, fifth; };
+        const Key keys[] = { { 9, frame::Mode::minor, "la mineur", 3, 7 }, { 4, frame::Mode::major, "mi majeur", 4, 7 } };
+        for (const auto& key : keys)
+        {
+            std::printf ("11. résonances sur bruit blanc, %s\n", key.name);
+            const uint16_t mask = frame::scaleMask (key.tonic, key.mode);
+            HarmonicResonator h; h.prepare (sr); h.setScale (mask, key.tonic); h.reset();
+            const int len = (int) sr * 6;
+            juce::AudioBuffer<float> b (2, len);
+            std::mt19937 rng (1); std::normal_distribution<float> nd (0.0f, 0.1f);
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n) b.setSample (c, n, nd (rng));
+            for (int pos = 0; pos < len; pos += 512)
+            {
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
+                h.process (v, 2, 1.0f);
+            }
+            constexpr int order = 15, N = 1 << order;
+            juce::dsp::FFT f (order);
+            std::vector<double> acc ((size_t) N / 2, 0.0);
+            std::vector<float> w ((size_t) N * 2);
+            for (int st = (int) sr; st + N < len; st += N / 2)
+            {
+                std::fill (w.begin(), w.end(), 0.0f);
+                for (int n = 0; n < N; ++n) w[(size_t) n] = b.getSample (0, st + n) * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) n / (float) N));
+                f.performFrequencyOnlyForwardTransform (w.data(), true);
+                for (int k = 0; k < N / 2; ++k) acc[(size_t) k] += (double) w[(size_t) k] * w[(size_t) k];
+            }
+            double pc[12] = {}, tot = 0, on = 0;
+            for (int k = 1; k < N / 2; ++k)
+            {
+                const double hz = k * sr / N;
+                if (hz < 150 || hz > 3000) continue;
+                const double midi = frame::hzToMidi (hz);
+                const int nn = (int) std::lround (midi);
+                tot += acc[(size_t) k];
+                if (std::abs (midi - nn) < 0.1) { pc[((nn % 12) + 12) % 12] += acc[(size_t) k]; on += acc[(size_t) k]; }
+            }
+            double mx = 0; for (double e : pc) mx = std::max (mx, e);
+            auto db = [&] (int p) { return 10.0 * std::log10 (pc[p] / mx + 1e-12); };
+            std::printf ("     ");
+            for (int i = 0; i < 12; ++i) std::printf ("%s:%+.0f ", nm[i], db (i));
+            double worstOut = -100, weakestChord = 0;
+            for (int i = 0; i < 12; ++i) if (! frame::maskContains (mask, i)) worstOut = std::max (worstOut, db (i));
+            for (int iv : { 0, key.third, key.fifth }) weakestChord = std::min (weakestChord, db ((key.tonic + iv) % 12));
+            const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2));
+            std::printf ("\n     accord (tonique/tierce/quinte) ≥ %.1f dB, hors gamme ≤ %.1f dB, sur les notes %.0f %%, niveau %.1f dB (entrée -20)\n",
+                         weakestChord, worstOut, 100.0 * on / tot, lvl);
+            check (weakestChord > -5.0 && worstOut < -15.0, "accord de la tonalité dominant, rien hors gamme");
+            check (on / tot > 0.7 && std::abs (lvl + 20.0f) < 1.5f, "le bruit chante sur les notes, niveau conservé");
+        }
     }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");

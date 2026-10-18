@@ -17,6 +17,7 @@ FrameAudioProcessor::FrameAudioProcessor()
 {
     mixParam  = apvts.getRawParameterValue (ParamIDs::mix);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
+    gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
 }
@@ -45,11 +46,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " %"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("0123456789.").getFloatValue(); })));
 
-    // 3. MODE : major / minor.
+    // 3. GAIN de sortie : −24 … +12 dB, défaut 0 dB.
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ParamIDs::gain, 1 }, "gain",
+        NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
+        AudioParameterFloatAttributes()
+            .withLabel ("dB")
+            .withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })
+            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789.").getFloatValue(); })));
+
+    // 4. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
 
-    // 4. NOTE : tonique parmi les 12 notes.
+    // 5. NOTE : tonique parmi les 12 notes.
     StringArray notes;
     for (auto* n : frame::noteNames)
         notes.add (n);
@@ -78,6 +88,11 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine.prepare (sampleRate, 2);
     engine.setColour (1.0f);                           // harmonie de la 1.4 (ancien COLOR à 100 %), fixe
     reverb.prepare (sampleRate, maxChunk);
+    resonator.prepare (sampleRate);
+    resonator.setScale (getCurrentScaleMask(), juce::jlimit (0, 11, (int) std::lround (noteParam->load())));
+    resonator.reset();
+    outputGain.reset (sampleRate, 0.05);
+    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (gainParam->load()));
     setLatencySamples (engine.getLatencySamples());   // compensation de latence par l'hôte
 
     dryBuffer.setSize (2, maxChunk, false, true, false);
@@ -155,6 +170,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         engine.reset();
         reverb.reset();
+        resonator.reset();
         dryDelay.clear();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
@@ -163,6 +179,8 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
 
     engine.setScaleMask (getCurrentScaleMask());       // fondu interne si la gamme change
+    resonator.setScale (getCurrentScaleMask(), juce::jlimit (0, 11, (int) std::lround (finiteOrZero (noteParam->load()))));
+    outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
     mixSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (mixParam->load()) * 0.01f));
 
     // REVERB : lissage exponentiel (~60 ms), une fois par bloc. La
@@ -201,6 +219,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + nuage granulaire
     engine.process (wetView);                                // 2. recalage + harmoniques + peigne (queue comprise)
+    resonator.process (wetView, numChannels, 1.0f);          // 3. résonances sur les notes de la gamme
    #ifdef FRAME_TEST_SIMULATE_WET_LOSS
     wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
    #endif
@@ -211,6 +230,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     for (int i = 0; i < numSamples; ++i)
     {
         const float m = mixSmoothed.getNextValue();
+        const float og = outputGain.getNextValue();
 
         float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
 
@@ -233,7 +253,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             guardDry += (delayed * delayed - guardDry) * guardCoef;
             guardWet += (rawWet * rawWet - guardWet) * guardCoef;
 
-            const float y = safetyLimit (delayed + m * (wet - delayed), invalid);
+            const float y = safetyLimit ((delayed + m * (wet - delayed)) * og, invalid);
             buffer.setSample (c, startSample + i, y);
 
             inLo  = juce::jmin (inLo, x);  inHi  = juce::jmax (inHi, x);
@@ -250,8 +270,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
             if (guardDry > 1.0e-7f)                               // le son d'origine joue (> −70 dBFS)
             {
                 const float ratio = std::sqrt (guardWet / guardDry);
-                // traité à moins de −6 dB de l'original : on réinjecte progressivement
-                target = juce::jlimit (0.0f, 1.0f, (0.5f - ratio) / 0.35f);
+                // traité à plus de −10 dB sous l'original : on réinjecte progressivement
+                // (pleine réinjection vers −20 dB ; la coupure observée dans FL était à −27 dB)
+                target = juce::jlimit (0.0f, 1.0f, (0.32f - ratio) / 0.22f);
             }
             const float k = target > directRestore ? restoreAttack : restoreRelease;
             directRestore += (target - directRestore) * k;
