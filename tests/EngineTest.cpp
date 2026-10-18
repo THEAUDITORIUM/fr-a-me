@@ -18,8 +18,7 @@
 #include "../Source/Scale.h"
 #include "../Source/AmbientReverb.h"
 #include "../Source/ZeroLatencyHarmonizer.h"
-#include "../Source/RetuneVocoder.h"
-#include "../Source/CutEq.h"
+#include "../Source/ProEq.h"
 #include "../Source/PitchShifter.h"
 
 #include <cstdio>
@@ -607,59 +606,9 @@ int main (int argc, char** argv)
         }
     }
 
-    // ---- 12. RETUNE : vocodeur sur les notes de la gamme --------------------
+    // ---- 11b. PITCH (elastic) --------------------------------------------------
     {
-        std::printf ("12. retune (vocodeur sur la gamme)\n");
-        // a) zéro latence : un clic ressort tout de suite (énergie dans les 3 premières ms)
-        {
-            RetuneVocoder v; v.prepare (sr); v.setScale (aMinor); v.reset();
-            juce::AudioBuffer<float> b (1, 4800); b.clear(); b.setSample (0, 0, 1.0f);
-            v.process (b, 1, 1.0f);
-            double early = 0, total = 0;
-            for (int n = 0; n < 4800; ++n) { const double e = (double) b.getSample (0, n) * b.getSample (0, n); total += e; if (n < (int) (0.003 * sr)) early += e; }
-            int firstAbove = 0; for (int n = 0; n < 4800; ++n) if (std::abs (b.getSample (0, n)) > 1.0e-3f) { firstAbove = n; break; }
-            std::printf ("     clic : sortie dès l'échantillon %d\n", firstAbove);
-            check (firstAbove < 8, "retune sans latence");
-        }
-        // b) un son désaccordé ressort sur les notes de la gamme
-        {
-            RetuneVocoder v; v.prepare (sr); v.setScale (aMinor); v.reset();
-            const int len = (int) sr * 2;
-            juce::AudioBuffer<float> b (2, len);
-            b.clear(); sine (b, 466.16, 0.3f);                     // la#4 : hors la mineur
-            for (int pos = 0; pos < len; pos += 512)
-            {
-                juce::AudioBuffer<float> vv (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
-                v.process (vv, 2, 1.0f);
-            }
-            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
-            const double note = frame::hzToMidi (hz);
-            const double cents = 100.0 * (note - std::round (note));
-            std::printf ("     la#4 (466 Hz) en la mineur -> %.2f Hz (%s, %+.1f cents)\n", hz,
-                         frame::maskContains (aMinor, (int) std::lround (note)) ? "dans la gamme" : "HORS gamme", cents);
-            check (frame::maskContains (aMinor, (int) std::lround (note)) && std::abs (cents) < 3.0, "le son ressort sur une note juste de la gamme");
-        }
-        // c) robustesse : on / off et changements de gamme rapides, bruit fort
-        {
-            RetuneVocoder v; v.prepare (sr);
-            juce::AudioBuffer<float> b (2, 256);
-            std::mt19937 rng (3); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
-            bool finite = true; float peak = 0;
-            for (int blk = 0; blk < (int) (10 * sr / 256); ++blk)
-            {
-                for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) b.setSample (c, n, 0.7f * u (rng));
-                v.setScale (frame::scaleMask ((blk / 30) % 12, (blk / 70) % 2 ? frame::Mode::minor : frame::Mode::major));
-                v.process (b, 2, (blk / 50) % 2 ? 1.0f : 0.0f);
-                for (int c = 0; c < 2; ++c) for (int n = 0; n < 256; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
-            }
-            std::printf ("     on/off + gammes en continu sur bruit fort : crête %.2f\n", peak);
-            check (finite && peak < 4.0f, "retune stable");
-        }
-    }
-
-    // ---- 13. PITCH (elastic) --------------------------------------------------
-    {
-        std::printf ("13. pitch (elastic)\n");
+        std::printf ("11b. pitch (elastic)\n");
         for (float st : { 12.0f, -12.0f, 7.0f, -5.0f, 0.0f })
         {
             PitchShifter ps; ps.prepare (sr);
@@ -687,92 +636,68 @@ int main (int argc, char** argv)
         }
     }
 
-    // ---- 14. EQ du spectrum (isoler / couper) ----------------------------------
+    // ---- 12. EQ façon Pro-Q (coupes + cloches) --------------------------------
     {
-        std::printf ("14. eq du spectrum\n");
-        auto levelAt = [&] (double hz, float lo, float hi)
+        std::printf ("12. eq façon pro-q\n");
+        auto run = [&] (double hz, ProEq::Settings st)
         {
-            CutEq eq; eq.prepare (sr);
+            ProEq eq; eq.prepare (sr);
             const int len = (int) sr;
             juce::AudioBuffer<float> b (2, len);
-            b.clear(); sine (b, hz, 0.5f);
+            b.clear(); sine (b, hz, 0.25f);
             const float before = b.getRMSLevel (0, len / 2, len / 2);
             for (int pos = 0; pos < len; pos += 256)
             {
                 float* p[2] = { b.getWritePointer (0, pos), b.getWritePointer (1, pos) };
-                eq.process (p, 2, juce::jmin (256, len - pos), lo, hi);
+                eq.process (p, 2, juce::jmin (256, len - pos), st);
             }
             return juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / before);
         };
-        const float pass = levelAt (2000.0, 500.0f, 6000.0f);
-        const float lowCut = levelAt (125.0, 500.0f, 6000.0f);
-        const float highCut = levelAt (11000.0, 500.0f, 3000.0f);
-        std::printf ("     plage 500 hz – 6 khz : 2 khz %+.1f db | 125 hz %+.1f db | 11 khz (haut 3 khz) %+.1f db\n", pass, lowCut, highCut);
-        check (std::abs (pass) < 0.5f && lowCut < -40.0f && highCut < -35.0f, "eq : coupe hors plage, plage intacte");
+        ProEq::Settings cuts; cuts.lowHz = 500.0f; cuts.highHz = 3000.0f;
+        const float pass = run (1200.0, cuts), lo = run (125.0, cuts), hi = run (12000.0, cuts);
+        std::printf ("     coupes 500 hz / 3 khz : 1.2 khz %+.1f db | 125 hz %+.1f db | 12 khz %+.1f db\n", pass, lo, hi);
+        check (std::abs (pass) < 1.0f && lo < -40.0f && hi < -40.0f, "eq : coupes basse et haute (24 db/oct)");
 
-        // en butée : son strictement inchangé
+        ProEq::Settings bell; bell.bellHz[1] = 1000.0f; bell.bellDb[1] = 12.0f; bell.bellQ[1] = 2.0f;
+        const float at = run (1000.0, bell), far = run (100.0, bell);
+        const float predicted = ProEq::magnitudeDb (1000.0f, bell);
+        std::printf ("     cloche +12 db à 1 khz : %+.1f db (courbe affichée %+.1f) | 100 hz %+.1f db\n", at, predicted, far);
+        check (std::abs (at - 12.0f) < 0.5f && std::abs (far) < 0.3f && std::abs (predicted - at) < 0.5f, "eq : cloche juste, courbe affichée fidèle");
+
+        // neutre : son strictement inchangé
         {
-            CutEq eq; eq.prepare (sr);
+            ProEq eq; eq.prepare (sr);
             juce::AudioBuffer<float> b (2, 4096);
             std::mt19937 rng (5); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
             for (int c = 0; c < 2; ++c) for (int n = 0; n < 4096; ++n) b.setSample (c, n, u (rng));
             const auto ref = b;
             float* p[2] = { b.getWritePointer (0), b.getWritePointer (1) };
-            eq.process (p, 2, 4096, CutEq::minHz, CutEq::maxHz);
+            eq.process (p, 2, 4096, ProEq::Settings {});
             float diff = 0; for (int n = 0; n < 4096; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
-            check (diff < 1.0e-7f, "eq en butée : son strictement inchangé");
+            check (diff < 1.0e-7f, "eq neutre : son strictement inchangé");
         }
-        // automation brutale des poignées : stable
+        // automation brutale : stable
         {
-            CutEq eq; eq.prepare (sr);
+            ProEq eq; eq.prepare (sr);
             juce::AudioBuffer<float> b (2, 64);
             std::mt19937 rng (6); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
             bool finite = true; float peak = 0;
             for (int blk = 0; blk < 4000; ++blk)
             {
-                for (int c = 0; c < 2; ++c) for (int n = 0; n < 64; ++n) b.setSample (c, n, 0.5f * u (rng));
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 64; ++n) b.setSample (c, n, 0.3f * u (rng));
                 float* p[2] = { b.getWritePointer (0), b.getWritePointer (1) };
-                const float lo = 40.0f * std::pow (300.0f, u (rng) * 0.5f + 0.5f);
-                eq.process (p, 2, 64, lo, lo * (1.0f + 20.0f * (u (rng) * 0.5f + 0.5f)));
+                ProEq::Settings st;
+                st.lowHz = 20.0f * std::pow (100.0f, u (rng) * 0.5f + 0.5f);
+                st.highHz = st.lowHz * (1.1f + 50.0f * (u (rng) * 0.5f + 0.5f));
+                for (int k = 0; k < 3; ++k) { st.bellHz[(size_t) k] = 20.0f * std::pow (1000.0f, u (rng) * 0.5f + 0.5f); st.bellDb[(size_t) k] = 18.0f * u (rng); st.bellQ[(size_t) k] = 0.3f * std::pow (33.0f, u (rng) * 0.5f + 0.5f); }
+                eq.process (p, 2, 64, st);
                 for (int c = 0; c < 2; ++c) for (int n = 0; n < 64; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
             }
             std::printf ("     automation brutale : crête %.2f\n", peak);
-            check (finite && peak < 3.0f, "eq stable sous automation brutale");
+            check (finite && peak < 20.0f, "eq stable sous automation brutale");
         }
     }
 
-    // ---- 15. Retune : modulations (phaser, flanger, chorus) ---------------------
-    {
-        std::printf ("15. retune : phaser / flanger / chorus\n");
-        RetuneVocoder v; v.prepare (sr);
-        v.setScale (frame::scaleMask (9, frame::Mode::minor));
-        const int len = (int) sr * 4;
-        juce::AudioBuffer<float> b (2, len);
-        b.clear(); sine (b, 440.0, 0.3f);
-        for (int pos = 0; pos < len; pos += 512)
-        {
-            juce::AudioBuffer<float> view (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
-            v.process (view, 2, 1.0f);
-        }
-        // la nappe bouge dans le temps (modulation) : enveloppe RMS par fenêtres de 50 ms
-        float mn = 1e9f, mx = 0;
-        const int w = (int) (0.05 * sr);
-        for (int pos = len / 4; pos + w < len; pos += w)
-        {
-            const float r = b.getRMSLevel (0, pos, w);
-            mn = juce::jmin (mn, r); mx = juce::jmax (mx, r);
-        }
-        double corr = 0, e0 = 1e-12, e1 = 1e-12;
-        for (int n = len / 4; n < len; ++n) { const double l = b.getSample (0, n), r = b.getSample (1, n); corr += l * r; e0 += l * l; e1 += r * r; }
-        corr /= std::sqrt (e0 * e1);
-        const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
-        const double cents = 1200.0 * std::log2 (hz / 440.0);
-        std::printf ("     la4 : %.1f hz (%+.1f cents) | relief de modulation %.1f db | corrélation g/d %.2f\n",
-                     hz, cents, juce::Decibels::gainToDecibels (mx / juce::jmax (1e-9f, mn)), corr);
-        check (std::abs (cents) < 5.0, "retune modulé : reste juste");
-        check (mx / juce::jmax (1e-9f, mn) > 1.12f, "phaser / flanger / chorus audibles (le son bouge)");
-        check (corr < 0.8, "retune modulé : stéréo large");
-    }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");
     return failures == 0 ? 0 : 1;

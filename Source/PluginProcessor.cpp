@@ -19,11 +19,16 @@ FrameAudioProcessor::FrameAudioProcessor()
     pitchParam = apvts.getRawParameterValue (ParamIDs::pitch);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
-    retuneParam = apvts.getRawParameterValue (ParamIDs::retune);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
     noteParam = apvts.getRawParameterValue (ParamIDs::note);
     eqLowParam  = apvts.getRawParameterValue (ParamIDs::eqLow);
     eqHighParam = apvts.getRawParameterValue (ParamIDs::eqHigh);
+    for (int b = 0; b < 3; ++b)
+    {
+        eqBellHzParam[b] = apvts.getRawParameterValue (ParamIDs::eqBellHz[b]);
+        eqBellDbParam[b] = apvts.getRawParameterValue (ParamIDs::eqBellDb[b]);
+        eqBellQParam[b]  = apvts.getRawParameterValue (ParamIDs::eqBellQ[b]);
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createParameterLayout()
@@ -32,8 +37,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     AudioProcessorValueTreeState::ParameterLayout layout;
 
     // 1. HARMO (ancien MIX) : 0–100 %, défaut 100 %. Dose uniquement le
-    //    traitement harmonique (peigne + harmoniques) : à 0 %, reverb, retune,
-    //    pitch et gain continuent de fonctionner.
+    //    traitement harmonique (peigne + harmoniques) : à 0 %, reverb, pitch,
+    //    EQ et gain continuent de fonctionner.
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::harmo, 1 }, "harmo",
         NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
@@ -70,9 +75,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { const int st = roundToInt (v); return (st > 0 ? "+" : "") + String (st) + " st"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789").getFloatValue(); })));
 
-    // 4. RETUNE : case à cocher (désactivée par défaut).
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::retune, 1 }, "retune", false));
-
     // 5. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::mode, 1 }, "mode", StringArray { "major", "minor" }, 0));
@@ -84,23 +86,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { ParamIDs::note, 1 }, "note", notes, 0));
 
-    // 7. EQ du spectrum (façon Chroma) : plage gardée [eq low, eq high].
-    //    En butée (40 Hz / 12 kHz) = aucun filtre.
-    auto hzRange = [] (float def)
+    // 7. EQ façon Pro-Q (partie spectrum) : coupe basse, 3 cloches, coupe haute.
+    //    Coupes en butée (20 Hz / 20 kHz) et cloches à 0 dB = aucun effet.
+    auto logRange = [] (float lo, float hi)
     {
-        NormalisableRange<float> r (CutEq::minHz, CutEq::maxHz,
-            [] (float lo, float hi, float t) { return lo * std::pow (hi / lo, t); },
-            [] (float lo, float hi, float v) { return std::log (v / lo) / std::log (hi / lo); },
-            [] (float lo, float hi, float v) { return jlimit (lo, hi, v); });
-        ignoreUnused (def);
-        return r;
+        return NormalisableRange<float> (lo, hi,
+            [] (float a, float b, float t) { return a * std::pow (b / a, t); },
+            [] (float a, float b, float v) { return std::log (v / a) / std::log (b / a); },
+            [] (float a, float b, float v) { return jlimit (a, b, v); });
     };
     auto hzText = AudioParameterFloatAttributes()
         .withLabel ("Hz")
         .withStringFromValueFunction ([] (float v, int) { return v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (roundToInt (v)) + " Hz"; })
         .withValueFromStringFunction ([] (const String& s) { const float v = s.retainCharacters ("0123456789.").getFloatValue(); return s.containsIgnoreCase ("k") ? v * 1000.0f : v; });
-    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqLow, 1 },  "eq low",  hzRange (CutEq::minHz), CutEq::minHz, hzText));
-    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqHigh, 1 }, "eq high", hzRange (CutEq::maxHz), CutEq::maxHz, hzText));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqLow, 2 },  "eq low cut",  logRange (ProEq::minHz, ProEq::maxHz), ProEq::minHz, hzText));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqHigh, 2 }, "eq high cut", logRange (ProEq::minHz, ProEq::maxHz), ProEq::maxHz, hzText));
+    for (int b = 0; b < ProEq::numBells; ++b)
+    {
+        const String n = "eq bell " + String (b + 1);
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqBellHz[b], 1 }, n + " freq",
+            logRange (ProEq::minHz, ProEq::maxHz), ProEq::defaultBellHz[b], hzText));
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqBellDb[b], 1 }, n + " gain",
+            NormalisableRange<float> (-ProEq::maxGainDb, ProEq::maxGainDb, 0.1f), 0.0f,
+            AudioParameterFloatAttributes().withLabel ("dB")
+                .withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })));
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::eqBellQ[b], 1 }, n + " q",
+            logRange (ProEq::minQ, ProEq::maxQ), 1.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 2); })));
+    }
 
     return layout;
 }
@@ -121,9 +134,6 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     maxChunk = juce::jlimit (32, 8192, samplesPerBlock > 0 ? samplesPerBlock : 512);
 
-    retuner.prepare (sampleRate);                      // RETUNE : 0 latence
-    retuner.setScale (getCurrentScaleMask());
-    retuner.reset();
     harmonizer.prepare (sampleRate);                   // traitement harmonique : 0 latence
     harmonizer.setScale (getCurrentScaleMask());
     harmonizer.reset();
@@ -142,7 +152,7 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
     preHarmoBuffer.setSize (2, maxChunk, false, true, false);
     pitcher.prepare (sampleRate);
-    cutEq.prepare (sampleRate);
+    proEq.prepare (sampleRate);
     outBuffer.setSize (2, maxChunk, false, true, false);
 
     engine.setScaleMask (getCurrentScaleMask());
@@ -186,6 +196,20 @@ namespace
     inline float finiteOrZero (float v) noexcept { return std::isfinite (v) ? v : 0.0f; }
 }
 
+ProEq::Settings FrameAudioProcessor::getEqSettings() const noexcept
+{
+    ProEq::Settings s;
+    s.lowHz = eqLowParam->load();
+    s.highHz = eqHighParam->load();
+    for (int b = 0; b < ProEq::numBells; ++b)
+    {
+        s.bellHz[(size_t) b] = eqBellHzParam[b]->load();
+        s.bellDb[(size_t) b] = eqBellDbParam[b]->load();
+        s.bellQ [(size_t) b] = eqBellQParam[b]->load();
+    }
+    return s;
+}
+
 uint16_t FrameAudioProcessor::getCurrentScaleMask() const noexcept
 {
     const int note = juce::jlimit (0, 11, (int) std::lround (noteParam->load()));
@@ -213,9 +237,8 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         engine.reset();
         harmonizer.reset();
-        retuner.reset();
         pitcher.reset();
-        cutEq.reset();
+        proEq.reset();
         reverb.reset();
         guardDry = guardWet = 0.0f;
         directRestore = 0.0f;
@@ -225,7 +248,6 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     engine.setScaleMask (getCurrentScaleMask());       // (affichage)
     harmonizer.setScale (getCurrentScaleMask());       // gains glissés si la gamme change
-    retuner.setScale (getCurrentScaleMask());          // fondu croisé si la gamme change
     outputGain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-24.0f, 12.0f, finiteOrZero (gainParam->load()))));
     harmoSmoothed.setTargetValue (juce::jlimit (0.0f, 1.0f, finiteOrZero (harmoParam->load()) * 0.01f));
 
@@ -264,8 +286,6 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
-    retuner.process (wetView, numChannels,                   // 2. RETUNE (si coché) : vocodeur sur la gamme
-                     retuneParam->load() > 0.5f ? 1.0f : 0.0f);
     for (int c = 0; c < numChannels; ++c)                    // (copie pour le dosage HARMO)
         preHarmoBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
     harmonizer.process (wetView, numChannels, 1.0f);         // 3. peigne + harmoniques justes (0 latence)
@@ -337,10 +357,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         }
     }
 
-    // 5b. EQ du spectrum (isoler / couper) : après le garde-fou, qui ne
-    //     « répare » donc pas une coupure voulue.
-    cutEq.process (outBuffer.getArrayOfWritePointers(), numChannels, numSamples,
-                   eqLowParam->load(), eqHighParam->load());
+    // 5b. EQ façon Pro-Q : après le garde-fou, qui ne « répare » donc pas
+    //     une coupure voulue.
+    proEq.process (outBuffer.getArrayOfWritePointers(), numChannels, numSamples, getEqSettings());
 
     // 5c. Limiteur de sortie, vu-mètres, tranches de forme d'onde.
     for (int i = 0; i < numSamples; ++i)

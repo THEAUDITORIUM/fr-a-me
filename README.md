@@ -4,7 +4,7 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **harmo** (0–100 %, dose l'harmonie), **retune** (case à cocher, vocodeur robotique façon Vocodex + phaser, flanger, chorus), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ** du spectrum (deux poignées : couper / isoler une plage de fréquences, façon Chroma), **thèmes** garden (par défaut) / sun, **mode** (major / minor), **note** (tonique, 12 notes).
+Contrôles : **harmo** (0–100 %, dose l'harmonie), **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12 demi-tons, elastic) et **gain** de sortie (−24 … +12 dB), petits boutons en haut à droite, **EQ façon Pro-Q** dans la partie spectrum (coupe basse, 3 cloches, coupe haute ; fréquences de gauche à droite), **thèmes** garden (par défaut) / sun, **mode** (major / minor), **note** (tonique, 12 notes).
 Tous automatisables et sauvegardés avec le projet.
 
 | garden (par défaut) | sun |
@@ -139,12 +139,9 @@ Résultats obtenus pendant le développement (48 kHz) :
 | bruit blanc → résonances, la mineur | la / do / mi ≥ −1.3 dB, hors gamme ≤ −18.5 dB, 81 % de l'énergie sur les notes, niveau conservé |
 | bruit blanc → résonances, mi majeur | mi / sol# / si ≥ −4.1 dB, hors gamme ≤ −19.3 dB, 80 % sur les notes |
 | vos hi-hats, chaîne complète | 90–92 % de l'énergie sur les notes de la gamme, hors gamme −25 à −41 dB, niveau identique |
-| RETUNE : clic | sortie dès l'échantillon 0 (aucune latence) |
-| RETUNE : la#4 en la mineur | ressort à 440.02 Hz (la4, +0.1 cent) |
-| RETUNE vs exemple Vocodex | stéréo 0.44 (0.43), relief 0.91, son d'origine 0.51, partiels justes 79 % |
 | PITCH +12 / −12 / +7 / −5 | 440.0 / 110.0 / 329.7 / 164.8 Hz depuis 220 Hz (±0.2 cent) ; 0 = inchangé |
-| HARMO à 0 | reverb, retune et pitch actifs ; tout à 0 → son d'origine (corrélation 0.999) |
-| automation brutale HARMO / REVERB / RETUNE / PITCH / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| HARMO à 0 | reverb, pitch et EQ actifs ; tout à 0 → son d'origine (corrélation 0.999) |
+| automation brutale HARMO / REVERB / PITCH / EQ / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -160,9 +157,7 @@ frame/
 │   ├── PluginProcessor.*     paramètres (APVTS), latence, mix dry/wet, état, bypass
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
-│   ├── RetuneVocoder.*       RETUNE : vocodeur robotique sur les notes de la gamme (0 latence)
-│   ├── RetuneFx.*            RETUNE : phaser → flanger → chorus (0 latence)
-│   ├── CutEq.*               EQ du spectrum : coupe bas / haut 24 dB/oct (0 latence)
+│   ├── ProEq.*               EQ façon Pro-Q : coupes 24 dB/oct + 3 cloches (0 latence)
 │   ├── PitchShifter.*        PITCH : transposition elastic (SOLA)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── HarmonicResonator.*   résonances étroites sur les notes de la gamme, pondérées par degré
@@ -170,7 +165,7 @@ frame/
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
 │   ├── Visualisers.*         bandes input / output / spectrum / partials
-│   ├── Controls.*            bascule major/minor, case retune, rangée des 12 notes, poignées de l'EQ
+│   ├── Controls.*            bascule major/minor, rangée des 12 notes, EQ façon Pro-Q (EqView)
 │   └── FrameLookAndFeel.*    palette, typographie, potentiomètre
 ├── Resources/fonts/          IBM Plex Mono (licence SIL OFL, voir OFL.txt)
 └── tests/                    banc de test du moteur, capture de l'interface
@@ -240,34 +235,21 @@ Le déplacement des notes fausses (vocodeur de phase des versions ≤ 1.8) deman
 obligatoirement une analyse avec retard : il n'est plus utilisé pour le son. Le moteur
 spectral sert désormais uniquement aux visualisations.
 
-**RETUNE 2.2** : poussé plus loin. Porteuses plus riches (fondamentale + octave +
-douzième, grain plus « machine »), puis une chaîne de modulations intégrée au retune, sans
-latence : **phaser** (6 étages, balayage 180 Hz → 3.4 kHz, gauche / droite en quadrature),
-**flanger** (0.5 → 4.5 ms, rétroaction 0.62, le « jet » métallique, gauche / droite en
-opposition) et **chorus** (3 voix réparties dans l'espace, désaccord ≤ 9 cents : tout reste
-juste). Mesuré sur l'exemple Vocodex : 95 % des partiels justes à ±10 cents (harmo 100 %),
-relief 0.81 (Vocodex : 0.80), le son bouge et s'élargit.
+**EQ façon Pro-Q** (2.3, partie spectrum) : fréquences de gauche à droite (20 Hz → 20 kHz),
+gain de haut en bas (±24 dB affichés), l'analyseur du son de sortie et les toniques de la
+gamme en fond. Cinq points à tirer à la souris : **coupe basse** (carré ⟋, 24 dB/oct),
+**3 cloches** (ronds 1 · 2 · 3 : gauche / droite = fréquence, haut / bas = gain ±18 dB,
+molette = largeur Q 0.3 … 10) et **coupe haute** (carré ⟍). Double-clic sur un point : remise
+à zéro. Coupes en butée et cloches à 0 dB : son strictement inchangé. 0 latence (filtres à
+variables d'état), automatisable, placé juste avant le limiteur de sortie. La courbe affichée
+correspond au son (cloche +12 dB mesurée à +12.0 dB).
 
-**EQ du spectrum** (2.2, façon Chroma) : deux poignées posées sur le spectrogramme. Tirer
-la poignée haute vers le bas coupe les aigus, la poignée basse vers le haut coupe les
-graves (24 dB/octave) ; tirer entre les deux fait glisser toute la plage pour isoler une
-zone. La fréquence s'affiche pendant le geste, les zones coupées sont voilées et hachurées.
-Double-clic : remise à zéro. En butée (40 Hz / 12 kHz) : aucun filtre. Placé juste avant
-le limiteur de sortie, 0 latence, automatisable (« eq low », « eq high »).
-
-**RETUNE** (case à cocher, refait en 2.1 — façon Vocodex) : vocodeur robotique sans
-latence dont les porteuses sont les notes de la gamme (mi1 → sol9). Aucune note n'est
-retirée : toutes les bandes sonnent, chaque porteuse est « robotique » (fondamentale +
-octave), les bandes sont réparties gauche / droite, et une part du son d'origine est gardée
-pour conserver glissés, textures et variations ; le niveau suit le son d'origine. Comparé à
-l'exemple Vocodex fourni : largeur stéréo identique (corrélation G/D 0.44 contre 0.43),
-relief 0.91 (0.80), son d'origine présent à 0.51 (0.41), mais 79 % des partiels exactement
-justes (26 % pour le Vocodex) — tout est accordé.
+(Le **retune** des versions 2.0 à 2.2 a été retiré en 2.3.)
 
 **HARMO** (ancien MIX, 0–100 %) : dose uniquement le traitement harmonique (peigne +
-harmoniques justes) ; à 100 % le son est celui de la 2.0.0. À 0 %, la réverbe, le retune,
+harmoniques justes) ; à 100 % le son est celui de la 2.0.0. À 0 %, la réverbe, l'EQ,
 le pitch et le gain fonctionnent toujours : chaque bouton agit seul, et ensemble ils
-s'enchaînent dans cet ordre — reverb → retune → harmo → pitch → gain — pour que tout ce qui
+s'enchaînent dans cet ordre — reverb → harmo → pitch → gain → EQ — pour que tout ce qui
 est ajouté (queue, porteuses) passe dans la gamme.
 
 **PITCH** (−12 … +12 demi-tons, 0 par défaut), façon elastic pitch : la hauteur change, pas

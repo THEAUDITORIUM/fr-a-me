@@ -15,6 +15,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <memory>
+#include <array>
 
 class ModeToggle final : public juce::Component
 {
@@ -30,23 +31,6 @@ private:
     juce::Rectangle<float> optionBounds (int index) const;
 
     int mode = 0;
-    std::unique_ptr<juce::ParameterAttachment> attachment;
-};
-
-/** Case à cocher « retune » : un petit carré au trait fin (jaune + coche
-    quand activé) suivi du mot, comme une légende de planche. */
-class RetuneToggle final : public juce::Component
-{
-public:
-    explicit RetuneToggle (juce::RangedAudioParameter& param);
-
-    void paint (juce::Graphics&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-
-    bool isOn() const noexcept { return on; }
-
-private:
-    bool on = false;
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
@@ -75,15 +59,22 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
-/** EQ du spectrum (façon Chroma) : deux poignées horizontales posées sur le
-    spectrogramme. Tout ce qui est sous « low » et au-dessus de « high » est
-    coupé (et assombri à l'écran). On tire une poignée pour la déplacer, on
-    tire entre les deux pour faire glisser toute la plage ; double-clic :
-    remise à zéro. La fréquence s'affiche pendant le geste. */
-class EqOverlay final : public juce::Component
+/** EQ façon Pro-Q, dans la partie spectrum : fréquences de gauche à droite
+    (20 Hz → 20 kHz, échelle log), gain de haut en bas (±24 dB affichés).
+    Derrière la courbe : l'analyseur du son de sortie et les toniques de la
+    gamme. Cinq points à tirer :
+      • coupe basse et coupe haute (gauche / droite, 24 dB/oct) ;
+      • 3 cloches (gauche / droite = fréquence, haut / bas = gain) ;
+    molette sur un point = largeur (Q) ; double-clic = remise à zéro. */
+class EqView final : public juce::Component
 {
 public:
-    EqOverlay (juce::RangedAudioParameter& low, juce::RangedAudioParameter& high);
+    static constexpr int numNodes = 5;           // 0 = coupe basse, 1-3 = cloches, 4 = coupe haute
+
+    EqView (juce::AudioProcessorValueTreeState& apvts);
+
+    void pushSpectrum (const float* levels, int numRows, float rowMinHz, float rowMaxHz) noexcept;
+    void setScale (uint16_t mask, int tonic);
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -92,19 +83,32 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+    static constexpr float displayDb = 24.0f;
 
 private:
-    enum class Grab { none, low, high, band };
+    float xFor (float hz) const noexcept;
+    float hzFor (float x) const noexcept;
+    float yFor (float db) const noexcept;
+    float dbFor (float y) const noexcept;
+    juce::Point<float> nodePos (int node) const noexcept;
+    int nodeAt (juce::Point<float> p) const noexcept;
+    juce::String nodeText (int node) const;
 
-    float yFor (float hz) const noexcept;
-    float hzFor (float y) const noexcept;
-    Grab hitTestGrab (float y) const noexcept;
+    struct Attach
+    {
+        juce::RangedAudioParameter* param = nullptr;
+        std::unique_ptr<juce::ParameterAttachment> attachment;
+    };
+    Attach freqA[numNodes], gainA[numNodes], qA[numNodes];   // gain / Q : cloches seulement
 
-    juce::RangedAudioParameter& lowParam;
-    juce::RangedAudioParameter& highParam;
-    std::unique_ptr<juce::ParameterAttachment> lowAttachment, highAttachment;
-    float lowHz = 40.0f, highHz = 12000.0f;
+    float freq[numNodes] {}, gain[numNodes] {}, q[numNodes] {};
+    std::array<float, 256> analyser {};
+    int analyserRows = 0;
+    float analyserMinHz = 40.0f, analyserMaxHz = 12000.0f;
+    uint16_t scaleMask = 0;
+    int tonic = 0;
 
-    Grab hover = Grab::none, dragging = Grab::none;
-    float dragStartY = 0.0f, dragStartLowY = 0.0f, dragStartHighY = 0.0f;
+    int hover = -1, dragging = -1;
 };

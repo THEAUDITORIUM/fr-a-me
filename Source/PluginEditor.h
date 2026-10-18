@@ -40,14 +40,12 @@ public:
 
 private:
     void drawTimeAxis (juce::Graphics&, juce::Rectangle<float> span);
-    void drawFrequencyLabels (juce::Graphics&, juce::Rectangle<float> band);
 
     FrameAudioProcessor& processor;
 
     WaveBand inputBand  { WaveBand::Source::input };
     WaveBand outputBand { WaveBand::Source::output };
-    SpectrogramBand spectrumBand;
-    EqOverlay eqOverlay;                  // poignées de l'EQ posées sur le spectrum
+    EqView eqView;                        // partie spectrum : EQ façon Pro-Q + analyseur
     PartialScore partialBand;
 
     juce::Slider harmoKnob, reverbKnob, gainKnob, pitchKnob;
@@ -57,7 +55,6 @@ private:
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
                     const char* paramID);
     ModeToggle modeToggle;
-    RetuneToggle retuneToggle;
     NoteRow noteRow;
 
     uint16_t shownMask = 0;
@@ -75,8 +72,7 @@ private:
     }
     const juce::Rectangle<int>   knobArea     { 140, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 290, 630, 92, 92 };
-    const juce::Rectangle<int>   modeArea     { 430, 646, 170, 36 };
-    const juce::Rectangle<int>   retuneArea   { 448, 692, 140, 26 };
+    const juce::Rectangle<int>   modeArea     { 430, 656, 170, 36 };
     const juce::Rectangle<int>   noteArea     { 630, 648, 290, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)

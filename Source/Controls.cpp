@@ -7,6 +7,8 @@
 #include "Controls.h"
 #include "FrameLookAndFeel.h"
 #include "Scale.h"
+#include "ProEq.h"
+#include "PluginProcessor.h"
 
 //==============================================================================
 //  ModeToggle
@@ -64,52 +66,6 @@ void ModeToggle::mouseUp (const juce::MouseEvent& e)
     else if (optionBounds (1).contains (e.position)) target = 1;
 
     attachment->setValueAsCompleteGesture ((float) target);
-}
-
-//==============================================================================
-//  RetuneToggle
-//==============================================================================
-RetuneToggle::RetuneToggle (juce::RangedAudioParameter& param)
-{
-    setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setTitle ("retune");
-    attachment = std::make_unique<juce::ParameterAttachment> (param, [this] (float v)
-    {
-        on = v > 0.5f;
-        repaint();
-    });
-    attachment->sendInitialUpdate();
-}
-
-void RetuneToggle::paint (juce::Graphics& g)
-{
-    const auto b = getLocalBounds().toFloat();
-    const float box = juce::jmin (b.getHeight() - 4.0f, 16.0f);
-    const juce::Rectangle<float> sq (b.getX() + 2.0f, b.getCentreY() - box * 0.5f, box, box);
-
-    if (on)
-    {
-        g.setColour (Palette::accent);
-        g.fillRect (sq);
-        // coche fine
-        juce::Path tick;
-        tick.startNewSubPath (sq.getX() + box * 0.22f, sq.getCentreY());
-        tick.lineTo (sq.getX() + box * 0.43f, sq.getBottom() - box * 0.25f);
-        tick.lineTo (sq.getRight() - box * 0.2f, sq.getY() + box * 0.25f);
-        g.setColour (Palette::onAccent);
-        g.strokePath (tick, juce::PathStrokeType (1.3f));
-    }
-    g.setColour (Palette::ink);
-    g.drawRect (sq, 0.8f);
-
-    drawMonoText (g, "retune", b.withTrimmedLeft (box + 12.0f), 14.0f, juce::Justification::centredLeft,
-                  on ? Palette::ink : Palette::pencil, on);
-}
-
-void RetuneToggle::mouseUp (const juce::MouseEvent& e)
-{
-    if (getLocalBounds().contains (e.getPosition()))
-        attachment->setValueAsCompleteGesture (on ? 0.0f : 1.0f);
 }
 
 //==============================================================================
@@ -221,175 +177,309 @@ void NoteRow::mouseExit (const juce::MouseEvent&)
 }
 
 //==============================================================================
-//  EqOverlay
+//  EqView (façon Pro-Q)
 //==============================================================================
 namespace
 {
-    constexpr float eqMinHz = 40.0f, eqMaxHz = 12000.0f;     // = axe du spectrum
-    constexpr float grabZone = 7.0f;
+    constexpr float eqLoHz = ProEq::minHz, eqHiHz = ProEq::maxHz;
 
-    juce::String hzText (float hz)
+    juce::String hzLabel (float hz)
     {
-        return hz >= 1000.0f ? juce::String (hz / 1000.0f, 2) + " khz" : juce::String (juce::roundToInt (hz)) + " hz";
+        return hz >= 1000.0f ? juce::String (hz / 1000.0f, hz >= 10000.0f ? 1 : 2) + " khz" : juce::String (juce::roundToInt (hz)) + " hz";
     }
 }
 
-EqOverlay::EqOverlay (juce::RangedAudioParameter& low, juce::RangedAudioParameter& high)
-    : lowParam (low), highParam (high)
+EqView::EqView (juce::AudioProcessorValueTreeState& apvts)
 {
-    lowAttachment  = std::make_unique<juce::ParameterAttachment> (low,  [this] (float v) { lowHz = v;  repaint(); });
-    highAttachment = std::make_unique<juce::ParameterAttachment> (high, [this] (float v) { highHz = v; repaint(); });
-    lowAttachment->sendInitialUpdate();
-    highAttachment->sendInitialUpdate();
-}
-
-float EqOverlay::yFor (float hz) const noexcept
-{
-    const float t = std::log (juce::jlimit (eqMinHz, eqMaxHz, hz) / eqMinHz) / std::log (eqMaxHz / eqMinHz);
-    return (float) getHeight() * (1.0f - t);
-}
-
-float EqOverlay::hzFor (float y) const noexcept
-{
-    const float t = juce::jlimit (0.0f, 1.0f, 1.0f - y / juce::jmax (1.0f, (float) getHeight()));
-    return eqMinHz * std::pow (eqMaxHz / eqMinHz, t);
-}
-
-EqOverlay::Grab EqOverlay::hitTestGrab (float y) const noexcept
-{
-    const float yl = yFor (lowHz), yh = yFor (highHz);
-    const float dl = std::abs (y - yl), dh = std::abs (y - yh);
-    if (dl <= grabZone || dh <= grabZone)
+    auto bind = [this, &apvts] (Attach& a, const char* id, float& target)
     {
-        if (dl < dh) return Grab::low;
-        if (dh < dl) return Grab::high;
-        return y >= yl ? Grab::low : Grab::high;      // confondues : selon le côté
+        a.param = apvts.getParameter (id);
+        if (a.param == nullptr) return;
+        a.attachment = std::make_unique<juce::ParameterAttachment> (*a.param, [this, &target] (float v) { target = v; repaint(); });
+        a.attachment->sendInitialUpdate();
+    };
+    bind (freqA[0], ParamIDs::eqLow, freq[0]);
+    bind (freqA[4], ParamIDs::eqHigh, freq[4]);
+    for (int b = 0; b < ProEq::numBells; ++b)
+    {
+        bind (freqA[b + 1], ParamIDs::eqBellHz[b], freq[b + 1]);
+        bind (gainA[b + 1], ParamIDs::eqBellDb[b], gain[b + 1]);
+        bind (qA[b + 1],    ParamIDs::eqBellQ[b],  q[b + 1]);
     }
-    const bool full = lowHz <= eqMinHz * 1.01f && highHz >= eqMaxHz * 0.99f;
-    if (! full && y > yh && y < yl)
-        return Grab::band;
-    return Grab::none;
 }
 
-void EqOverlay::paint (juce::Graphics& g)
+float EqView::xFor (float hz) const noexcept
+{
+    const float pad = 8.0f;
+    const float t = std::log (juce::jlimit (eqLoHz, eqHiHz, hz) / eqLoHz) / std::log (eqHiHz / eqLoHz);
+    return pad + t * ((float) getWidth() - 2.0f * pad);
+}
+
+float EqView::hzFor (float x) const noexcept
+{
+    const float pad = 8.0f;
+    const float t = juce::jlimit (0.0f, 1.0f, (x - pad) / juce::jmax (1.0f, (float) getWidth() - 2.0f * pad));
+    return eqLoHz * std::pow (eqHiHz / eqLoHz, t);
+}
+
+float EqView::yFor (float db) const noexcept
+{
+    const float h = (float) getHeight(), pad = 10.0f;
+    return pad + (h - 2.0f * pad) * 0.5f * (1.0f - db / displayDb);
+}
+
+float EqView::dbFor (float y) const noexcept
+{
+    const float h = (float) getHeight(), pad = 10.0f;
+    return displayDb * (1.0f - 2.0f * (y - pad) / juce::jmax (1.0f, h - 2.0f * pad));
+}
+
+juce::Point<float> EqView::nodePos (int n) const noexcept
+{
+    if (n == 0 || n == numNodes - 1)
+    {
+        // Coupe : point sur la ligne 0 dB, gardé dans le cadre en butée.
+        return { juce::jlimit (8.0f, (float) getWidth() - 8.0f, xFor (freq[n])), yFor (0.0f) };
+    }
+    return { xFor (freq[n]), yFor (gain[n]) };
+}
+
+int EqView::nodeAt (juce::Point<float> p) const noexcept
+{
+    int best = -1;
+    float bestD = 11.0f;
+    for (int n = 0; n < numNodes; ++n)
+    {
+        const float d = nodePos (n).getDistanceFrom (p);
+        if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+}
+
+juce::String EqView::nodeText (int n) const
+{
+    if (n == 0) return ProEq::lowCutOn (freq[0])  ? "low cut " + hzLabel (freq[0]) : juce::String ("low cut off");
+    if (n == 4) return ProEq::highCutOn (freq[4]) ? "high cut " + hzLabel (freq[4]) : juce::String ("high cut off");
+    return "bell " + juce::String (n) + "  " + hzLabel (freq[n]) + "  " + (gain[n] > 0.05f ? "+" : "")
+         + juce::String (gain[n], 1) + " db  q " + juce::String (q[n], 2);
+}
+
+void EqView::pushSpectrum (const float* levels, int numRows, float rowMinHz, float rowMaxHz) noexcept
+{
+    analyserRows = juce::jmin (numRows, (int) analyser.size());
+    analyserMinHz = rowMinHz; analyserMaxHz = rowMaxHz;
+    for (int r = 0; r < analyserRows; ++r)
+    {
+        const float v = juce::jlimit (0.0f, 1.0f, levels[r]);
+        auto& a = analyser[(size_t) r];
+        a = v > a ? v : a + (v - a) * 0.18f;          // montée immédiate, retombée douce
+    }
+}
+
+void EqView::setScale (uint16_t mask, int newTonic)
+{
+    if (mask != scaleMask || newTonic != tonic)
+    {
+        scaleMask = mask; tonic = newTonic;
+        repaint();
+    }
+}
+
+void EqView::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
-    const float yl = yFor (lowHz), yh = yFor (highHz);
-    const bool lowOn = lowHz > eqMinHz * 1.01f, highOn = highHz < eqMaxHz * 0.99f;
+    const float w = b.getWidth(), h = b.getHeight();
 
-    // Zones coupées : papier voilé + hachures fines (comme une zone barrée sur une planche).
-    auto shade = [&] (juce::Rectangle<float> r)
+    // Grille : décades et repères de gain.
+    for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
     {
-        if (r.getHeight() <= 0.5f) return;
-        g.setColour (Palette::paper.withAlpha (0.72f));
-        g.fillRect (r);
-        g.setColour (Palette::pencil.withAlpha (0.35f));
-        g.saveState();
-        g.reduceClipRegion (r.toNearestInt());
-        for (float x = r.getX() - r.getHeight(); x < r.getRight(); x += 9.0f)
-            g.drawLine (x, r.getBottom(), x + r.getHeight(), r.getY(), 0.5f);
-        g.restoreState();
-    };
-    if (highOn) shade ({ b.getX(), b.getY(), b.getWidth(), yh });
-    if (lowOn)  shade ({ b.getX(), yl, b.getWidth(), b.getBottom() - yl });
-
-    auto handle = [&] (float y, bool on, bool active, bool isLow)
+        const float x = xFor (f);
+        g.setColour (Palette::faint);
+        g.drawVerticalLine ((int) x, 0.0f, h);
+        drawMonoText (g, f >= 1000.0f ? juce::String ((int) (f / 1000.0f)) + "k" : juce::String ((int) f),
+                      { x + 2.0f, h - 13.0f, 30.0f, 11.0f }, 8.0f, juce::Justification::centredLeft, Palette::pencil);
+    }
+    for (float db : { -12.0f, 12.0f })
     {
-        const float yy = juce::jlimit (1.0f, b.getHeight() - 1.0f, y);
-        g.setColour ((on || active) ? Palette::ink : Palette::pencil.withAlpha (0.6f));
-        g.drawLine (b.getX(), yy, b.getRight(), yy, active ? 1.4f : 1.0f);
+        g.setColour (Palette::faint);
+        g.drawHorizontalLine ((int) yFor (db), 0.0f, w);
+    }
 
-        // Poignée : petite pastille à droite, avec ↕.
-        const juce::Rectangle<float> tab (b.getRight() - 30.0f, juce::jlimit (2.0f, b.getHeight() - 14.0f, yy - 6.0f), 22.0f, 12.0f);   // toujours dans le cadre
-        g.setColour (active ? Palette::accent : Palette::paper);
-        g.fillRoundedRectangle (tab, 3.0f);
-        g.setColour ((on || active) ? Palette::ink : Palette::pencil);
-        g.drawRoundedRectangle (tab, 3.0f, 0.8f);
-        const auto c = tab.getCentre();
-        juce::Path arrows;
-        arrows.addTriangle (c.x - 3.0f, c.y - 1.2f, c.x + 3.0f, c.y - 1.2f, c.x, c.y - 4.2f);
-        arrows.addTriangle (c.x - 3.0f, c.y + 1.2f, c.x + 3.0f, c.y + 1.2f, c.x, c.y + 4.2f);
-        g.fillPath (arrows);
+    // Toniques de la gamme (une par octave) : traits verticaux à l'encre de la gamme.
+    for (int octave = 0; octave <= 9; ++octave)
+    {
+        const float hz = (float) frame::midiToHz (12.0 * (octave + 1) + tonic);
+        if (hz < eqLoHz || hz > eqHiHz) continue;
+        const float x = xFor (hz);
+        g.setColour (Palette::scaleInk.withAlpha (0.45f));
+        g.drawVerticalLine ((int) x, 12.0f, h);
+        drawMonoText (g, juce::String (frame::noteNames[juce::jlimit (0, 11, tonic)]) + juce::String (octave),
+                      { x - 14.0f, 1.0f, 28.0f, 10.0f }, 7.5f, juce::Justification::centred, Palette::accentInk);
+    }
 
-        // Valeur : pendant le geste ou au survol, et dès que la poignée coupe.
-        if (on || active)
+    // Analyseur (son de sortie) : surface pleine, du bas vers le niveau.
+    if (analyserRows > 1)
+    {
+        juce::Path spec;
+        const float ratio = analyserMaxHz / analyserMinHz;
+        spec.startNewSubPath (xFor (analyserMinHz), h);
+        for (int r = 0; r < analyserRows; ++r)
         {
-            const auto text = hzText (isLow ? lowHz : highHz);
-            const float ty = isLow ? juce::jmin (yy + 4.0f, b.getHeight() - 16.0f) : juce::jmax (yy - 16.0f, 2.0f);
-            const juce::Rectangle<float> box (b.getRight() - 104.0f, ty, 68.0f, 13.0f);
-            g.setColour (Palette::paper.withAlpha (0.92f));
-            g.fillRect (box);
-            g.setColour (Palette::ink);
-            g.drawRect (box, 0.6f);
-            drawMonoText (g, (isLow ? "low " : "high ") + text, box, 8.5f, juce::Justification::centred, Palette::ink);
+            const float hz = analyserMinHz * std::pow (ratio, ((float) r + 0.5f) / (float) analyserRows);
+            // lissage sur ±2 lignes (le grave de la FFT est en marches d'escalier)
+            float sum = 0.0f; int cnt = 0;
+            for (int k = juce::jmax (0, r - 2); k <= juce::jmin (analyserRows - 1, r + 2); ++k) { sum += analyser[(size_t) k]; ++cnt; }
+            const float lvl = std::pow (sum / (float) cnt, 1.5f);
+            spec.lineTo (xFor (hz), h - lvl * (h - 22.0f) * 0.85f);
         }
-    };
-    handle (yh, highOn, hover == Grab::high || dragging == Grab::high || dragging == Grab::band, false);
-    handle (yl, lowOn,  hover == Grab::low  || dragging == Grab::low  || dragging == Grab::band, true);
+        spec.lineTo (xFor (analyserMaxHz), h);
+        spec.closeSubPath();
+        g.setColour (Palette::ink.withAlpha (0.07f));
+        g.fillPath (spec);
+        g.setColour (Palette::graphite.withAlpha (0.35f));
+        g.strokePath (spec, juce::PathStrokeType (0.7f));
+    }
+
+    // Ligne 0 dB.
+    g.setColour (Palette::pencil);
+    g.drawHorizontalLine ((int) yFor (0.0f), 0.0f, w);
+
+    // Courbe de l'EQ + surface entre la courbe et 0 dB (comme Pro-Q).
+    {
+        ProEq::Settings s;
+        s.lowHz = freq[0]; s.highHz = freq[4];
+        for (int k = 0; k < ProEq::numBells; ++k)
+        {
+            s.bellHz[(size_t) k] = freq[k + 1]; s.bellDb[(size_t) k] = gain[k + 1]; s.bellQ[(size_t) k] = q[k + 1];
+        }
+        juce::Path curve, area;
+        const float y0 = yFor (0.0f);
+        area.startNewSubPath (0.0f, y0);
+        bool firstPoint = true;
+        for (float x = 0.0f; x <= w; x += 1.5f)
+        {
+            const float db = juce::jlimit (-displayDb - 4.0f, displayDb + 4.0f, ProEq::magnitudeDb (hzFor (x), s));
+            const float y = juce::jlimit (-2.0f, h + 2.0f, yFor (db));
+            if (firstPoint) { curve.startNewSubPath (x, y); firstPoint = false; } else curve.lineTo (x, y);
+            area.lineTo (x, y);
+        }
+        area.lineTo (w, y0);
+        area.closeSubPath();
+        g.setColour (Palette::accent.withAlpha (0.30f));
+        g.fillPath (area);
+        g.setColour (Palette::accentInk);
+        g.strokePath (curve, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    // Points.
+    for (int n = 0; n < numNodes; ++n)
+    {
+        const auto p = nodePos (n);
+        const bool active = (n == hover || n == dragging);
+        const bool cut = (n == 0 || n == numNodes - 1);
+        const bool engaged = cut ? (n == 0 ? ProEq::lowCutOn (freq[0]) : ProEq::highCutOn (freq[4])) : std::abs (gain[n]) > 0.05f;
+        const float r = active ? 6.5f : 5.0f;
+        const juce::Rectangle<float> box (p.x - r, p.y - r, 2.0f * r, 2.0f * r);
+        g.setColour (engaged || active ? Palette::accent : Palette::paper);
+        if (cut) g.fillRoundedRectangle (box, 2.0f); else g.fillEllipse (box);       // coupes : carrés, cloches : ronds
+        g.setColour (engaged || active ? Palette::ink : Palette::graphite);
+        if (cut)
+        {
+            g.drawRoundedRectangle (box, 2.0f, 1.0f);
+            // petit pictogramme de pente : ⟋ (coupe basse) / ⟍ (coupe haute)
+            const float d = r * 0.5f;
+            if (n == 0) g.drawLine (p.x - d, p.y + d, p.x + d, p.y - d, 1.0f);
+            else        g.drawLine (p.x - d, p.y - d, p.x + d, p.y + d, 1.0f);
+        }
+        else
+        {
+            g.drawEllipse (box, 1.0f);
+            drawMonoText (g, juce::String (n), box, 7.5f, juce::Justification::centred,
+                          engaged || active ? Palette::onAccent : Palette::graphite, true, 0.0f);
+        }
+    }
+
+    // Étiquette du point survolé / tiré.
+    const int shown = dragging >= 0 ? dragging : hover;
+    if (shown >= 0)
+    {
+        const auto p = nodePos (shown);
+        const auto text = nodeText (shown);
+        const float tw = 9.0f + 6.2f * (float) text.length();
+        float tx = juce::jlimit (2.0f, w - tw - 2.0f, p.x - tw * 0.5f);
+        float ty = p.y - 26.0f < 2.0f ? p.y + 12.0f : p.y - 26.0f;
+        const juce::Rectangle<float> box (tx, ty, tw, 14.0f);
+        g.setColour (Palette::paper.withAlpha (0.94f));
+        g.fillRect (box);
+        g.setColour (Palette::ink);
+        g.drawRect (box, 0.6f);
+        drawMonoText (g, text, box, 8.5f, juce::Justification::centred, Palette::ink);
+    }
+
+    g.setColour (Palette::pencil);
+    g.drawRect (b, 0.6f);
 }
 
-void EqOverlay::mouseMove (const juce::MouseEvent& e)
+void EqView::mouseMove (const juce::MouseEvent& e)
 {
-    const auto h = hitTestGrab (e.position.y);
-    if (h != hover) { hover = h; repaint(); }
-    setMouseCursor (h == Grab::none ? juce::MouseCursor::NormalCursor
-                  : h == Grab::band ? juce::MouseCursor::DraggingHandCursor
-                                    : juce::MouseCursor::UpDownResizeCursor);
+    const int n = nodeAt (e.position);
+    if (n != hover) { hover = n; repaint(); }
+    setMouseCursor (n >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
 }
 
-void EqOverlay::mouseExit (const juce::MouseEvent&)
+void EqView::mouseExit (const juce::MouseEvent&)
 {
-    if (hover != Grab::none) { hover = Grab::none; repaint(); }
+    if (hover >= 0) { hover = -1; repaint(); }
 }
 
-void EqOverlay::mouseDown (const juce::MouseEvent& e)
+void EqView::mouseDown (const juce::MouseEvent& e)
 {
-    dragging = hitTestGrab (e.position.y);
-    dragStartY = e.position.y;
-    dragStartLowY = yFor (lowHz);
-    dragStartHighY = yFor (highHz);
-    if (dragging == Grab::low || dragging == Grab::band)  lowAttachment->beginGesture();
-    if (dragging == Grab::high || dragging == Grab::band) highAttachment->beginGesture();
+    dragging = nodeAt (e.position);
+    if (dragging < 0) return;
+    if (freqA[dragging].attachment) freqA[dragging].attachment->beginGesture();
+    if (gainA[dragging].attachment) gainA[dragging].attachment->beginGesture();
     repaint();
 }
 
-void EqOverlay::mouseDrag (const juce::MouseEvent& e)
+void EqView::mouseDrag (const juce::MouseEvent& e)
 {
-    const float dy = e.position.y - dragStartY;
-    constexpr float minRatio = 1.06f;                       // les deux poignées ne se croisent pas
-    switch (dragging)
+    if (dragging < 0) return;
+    float hz = hzFor (e.position.x);
+    if (dragging == 0) hz = juce::jmin (hz, freq[4] / 1.06f);                 // la coupe basse reste sous la haute
+    if (dragging == 4) hz = juce::jmax (hz, freq[0] * 1.06f);
+    if (freqA[dragging].attachment) freqA[dragging].attachment->setValueAsPartOfGesture (hz);
+    if (gainA[dragging].attachment)
+        gainA[dragging].attachment->setValueAsPartOfGesture (juce::jlimit (-ProEq::maxGainDb, ProEq::maxGainDb, dbFor (e.position.y)));
+}
+
+void EqView::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging >= 0)
     {
-        case Grab::low:
-            lowAttachment->setValueAsPartOfGesture (juce::jmin (hzFor (dragStartLowY + dy), highHz / minRatio));
-            break;
-        case Grab::high:
-            highAttachment->setValueAsPartOfGesture (juce::jmax (hzFor (dragStartHighY + dy), lowHz * minRatio));
-            break;
-        case Grab::band:
-        {
-            // La plage glisse sans changer de largeur (bornée par les bords).
-            const float h = (float) getHeight();
-            const float d = juce::jlimit (-dragStartHighY, h - dragStartLowY, dy);
-            lowAttachment->setValueAsPartOfGesture (hzFor (dragStartLowY + d));
-            highAttachment->setValueAsPartOfGesture (hzFor (dragStartHighY + d));
-            break;
-        }
-        case Grab::none: break;
+        if (freqA[dragging].attachment) freqA[dragging].attachment->endGesture();
+        if (gainA[dragging].attachment) gainA[dragging].attachment->endGesture();
+    }
+    dragging = -1;
+    repaint();
+}
+
+void EqView::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const int n = nodeAt (e.position);
+    if (n < 0) return;
+    if (n == 0) freqA[0].attachment->setValueAsCompleteGesture (ProEq::minHz);
+    else if (n == 4) freqA[4].attachment->setValueAsCompleteGesture (ProEq::maxHz);
+    else
+    {
+        gainA[n].attachment->setValueAsCompleteGesture (0.0f);
+        qA[n].attachment->setValueAsCompleteGesture (1.0f);
     }
 }
 
-void EqOverlay::mouseUp (const juce::MouseEvent&)
+void EqView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (dragging == Grab::low || dragging == Grab::band)  lowAttachment->endGesture();
-    if (dragging == Grab::high || dragging == Grab::band) highAttachment->endGesture();
-    dragging = Grab::none;
-    repaint();
-}
-
-void EqOverlay::mouseDoubleClick (const juce::MouseEvent& e)
-{
-    // Double-clic sur une poignée : elle revient en butée ; ailleurs : tout est remis à zéro.
-    const auto h = hitTestGrab (e.position.y);
-    if (h != Grab::high) lowAttachment->setValueAsCompleteGesture (eqMinHz);
-    if (h != Grab::low)  highAttachment->setValueAsCompleteGesture (eqMaxHz);
+    const int n = dragging >= 0 ? dragging : nodeAt (e.position);
+    if (n <= 0 || n >= numNodes - 1 || ! qA[n].attachment) return;     // Q : cloches seulement
+    const float factor = std::pow (1.25f, wheel.deltaY * 4.0f);
+    qA[n].attachment->setValueAsCompleteGesture (juce::jlimit (ProEq::minQ, ProEq::maxQ, q[n] * factor));
 }

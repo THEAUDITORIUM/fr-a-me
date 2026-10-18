@@ -12,18 +12,15 @@
 //==============================================================================
 FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
-      eqOverlay  (*p.apvts.getParameter (ParamIDs::eqLow), *p.apvts.getParameter (ParamIDs::eqHigh)),
+      eqView     (p.apvts),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
-      retuneToggle (*p.apvts.getParameter (ParamIDs::retune)),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
 {
     Palette::apply (Palette::fromName (p.getTheme()));
-    spectrumBand.refreshTheme();
 
     addAndMakeVisible (inputBand);
     addAndMakeVisible (outputBand);
-    addAndMakeVisible (spectrumBand);
-    addAndMakeVisible (eqOverlay);
+    addAndMakeVisible (eqView);
     addAndMakeVisible (partialBand);
 
     setupKnob (harmoKnob,  "harmo",  100.0, knobArea,   harmoAttachment,  ParamIDs::harmo);
@@ -34,7 +31,6 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     pitchKnob.setMouseDragSensitivity (300);
 
     addAndMakeVisible (modeToggle);
-    addAndMakeVisible (retuneToggle);
     addAndMakeVisible (noteRow);
 
     setSize (designWidth, designHeight);
@@ -61,15 +57,13 @@ void FrameCanvas::resized()
 {
     inputBand.setBounds    (inputArea.toNearestInt());
     outputBand.setBounds   (outputArea.toNearestInt());
-    spectrumBand.setBounds (spectrumArea.toNearestInt());
-    eqOverlay.setBounds    (spectrumArea.toNearestInt());
+    eqView.setBounds       (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     harmoKnob.setBounds  (knobArea);
     pitchKnob.setBounds  (pitchArea);
     reverbKnob.setBounds (reverbArea);
     gainKnob.setBounds   (gainArea);
     modeToggle.setBounds (modeArea);
-    retuneToggle.setBounds (retuneArea);
     noteRow.setBounds   (noteArea);
 }
 
@@ -77,7 +71,6 @@ void FrameCanvas::applyTheme (Theme t)
 {
     Palette::apply (t);
     processor.setTheme (Palette::toName (t));
-    spectrumBand.refreshTheme();
     if (onThemeChanged) onThemeChanged();
     repaint();
     for (auto* child : getChildren())
@@ -118,13 +111,14 @@ void FrameCanvas::refresh()
     guard = 0;
     while (guard++ < 64 && processor.getSpectralQueue().pop (frameInfo))
     {
-        spectrumBand.push (frameInfo);
+        eqView.pushSpectrum (frameInfo.spectrum, SpectralFrameInfo::numSpectrumRows,
+                             SpectralEngine::displayMinHz, SpectralEngine::displayMaxHz);
         partialBand.push (frameInfo);
     }
 
     // 3. Gamme courante (surlignage du spectrogramme, points sous les notes)
     const uint16_t mask = processor.getCurrentScaleMask();
-    spectrumBand.setScaleMask (mask);
+    eqView.setScale (mask, noteRow.getNote());
     noteRow.setScaleMask (mask);
     if (mask != shownMask)
     {
@@ -134,7 +128,7 @@ void FrameCanvas::refresh()
 
     inputBand.repaint();
     outputBand.repaint();
-    spectrumBand.repaint();
+    eqView.repaint();
     partialBand.repaint();
 }
 
@@ -192,12 +186,12 @@ void FrameCanvas::paint (juce::Graphics& g)
     sideNote ("-1.0", inputArea.getBottom() - 4.0f);
     sideNote ("+1.0", outputArea.getY() + 4.0f);
     sideNote ("-1.0", outputArea.getBottom() - 4.0f);
-    sideNote ("12 khz", spectrumArea.getY() + 4.0f);
-    sideNote ("40 hz",  spectrumArea.getBottom() - 4.0f);
+    sideNote ("+24 db", spectrumArea.getY() + 10.0f);
+    sideNote ("0 db",   spectrumArea.getCentreY());
+    sideNote ("-24 db", spectrumArea.getBottom() - 10.0f);
     sideNote ("12 khz", partialArea.getY() + 4.0f);
     sideNote ("40 hz",  partialArea.getBottom() - 4.0f);
 
-    drawFrequencyLabels (g, spectrumArea);
 
     // ---- Rappels annotés sur les bandes (façon « highway / tree ») ------------
     drawCallout (g, "dry signal", { right - 210.0f, inputArea.getY() - 8.0f },
@@ -211,12 +205,11 @@ void FrameCanvas::paint (juce::Graphics& g)
         const int tonic = juce::jlimit (0, 11, noteRow.getNote());
         double midi = 60.0 + tonic;
         if (midi < 64.0) midi += 12.0;
-        const float t = FreqAxis::toNorm ((float) frame::midiToHz (midi));
-        const float y = spectrumArea.getBottom() - t * spectrumArea.getHeight();
-        drawCallout (g, "scale frequencies", { right - 280.0f, spectrumArea.getY() - 8.0f },
-                     { right - 110.0f, y }, true);
-        g.setColour (Palette::ink);
-        g.fillEllipse (right - 112.0f, y - 2.0f, 4.0f, 4.0f);
+        // Même échelle que l'EQ (20 Hz → 20 kHz, marge de 8 unités de chaque côté).
+        const float t = std::log ((float) frame::midiToHz (midi) / ProEq::minHz) / std::log (ProEq::maxHz / ProEq::minHz);
+        const float x = spectrumArea.getX() + 8.0f + t * (spectrumArea.getWidth() - 16.0f);
+        drawCallout (g, "scale frequencies", { x - 190.0f, spectrumArea.getY() - 8.0f },
+                     { x, spectrumArea.getY() }, true);
     }
 
     // Légende de la partition
@@ -274,26 +267,6 @@ void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)
         const float xh = span.getRight() - (float) ((s + 0.5) / seconds) * span.getWidth();
         if (xh > span.getX())
             g.drawVerticalLine ((int) xh, span.getY() - 2.0f, span.getY() + 1.0f);
-    }
-}
-
-void FrameCanvas::drawFrequencyLabels (juce::Graphics& g, juce::Rectangle<float> band)
-{
-    // À gauche du spectrogramme : la tonique de chaque octave, petit trait jaune.
-    const int tonic = juce::jlimit (0, 11, noteRow.getNote());
-    for (int octave = 1; octave <= 9; ++octave)
-    {
-        const double midi = 12.0 * (octave + 1) + tonic;
-        const float hz = (float) frame::midiToHz (midi);
-        if (hz < SpectralEngine::displayMinHz || hz > SpectralEngine::displayMaxHz)
-            continue;
-
-        const float y = band.getBottom() - FreqAxis::toNorm (hz) * band.getHeight();
-        g.setColour (Palette::accentInk);
-        g.drawLine (band.getX() - 10.0f, y, band.getX() - 2.0f, y, 1.2f);
-        drawMonoText (g, juce::String (frame::noteNames[tonic]) + juce::String (octave),
-                      { band.getX() - 52.0f, y - 6.0f, 38.0f, 12.0f }, 9.0f,
-                      juce::Justification::centredRight, Palette::graphite);
     }
 }
 

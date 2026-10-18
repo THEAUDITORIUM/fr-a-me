@@ -12,9 +12,8 @@
 #include "SpectralEngine.h"
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
-#include "RetuneVocoder.h"
 #include "PitchShifter.h"
-#include "CutEq.h"
+#include "ProEq.h"
 #include "LockFreeQueue.h"
 
 /** Un "pixel" des bandes de forme d'onde : min / max sur un petit paquet
@@ -30,11 +29,13 @@ namespace ParamIDs
     inline constexpr const char* pitch = "pitch";
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* gain   = "gain";
-    inline constexpr const char* retune = "retune";
     inline constexpr const char* mode = "mode";
     inline constexpr const char* note = "note";
-    inline constexpr const char* eqLow  = "eqLow";    // EQ du spectrum : coupure basse (Hz)
-    inline constexpr const char* eqHigh = "eqHigh";   // EQ du spectrum : coupure haute (Hz)
+    inline constexpr const char* eqLow  = "eqLow";    // EQ : coupe basse (Hz)
+    inline constexpr const char* eqHigh = "eqHigh";   // EQ : coupe haute (Hz)
+    inline constexpr const char* eqBellHz[3] { "eqB1f", "eqB2f", "eqB3f" };   // EQ : cloches (Hz)
+    inline constexpr const char* eqBellDb[3] { "eqB1g", "eqB2g", "eqB3g" };   //      gain (dB)
+    inline constexpr const char* eqBellQ [3] { "eqB1q", "eqB2q", "eqB3q" };   //      largeur (Q)
 }
 
 class FrameAudioProcessor final : public juce::AudioProcessor
@@ -86,6 +87,9 @@ public:
 
     /** Masque de la gamme courante (lu par l'UI pour le surlignage). */
     uint16_t getCurrentScaleMask() const noexcept;
+
+    /** Réglages courants de l'EQ (lus aussi par l'interface pour la courbe). */
+    ProEq::Settings getEqSettings() const noexcept;
     int getLatencyInSamples() const noexcept { return 0; }                       // aucun retard
     int getAnalysisFftSize() const noexcept  { return engine.getFftSize(); }     // pour l'axe temporel
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
@@ -107,18 +111,19 @@ private:
     SpectralEngine engine;                // analyse pour l'affichage (ne touche pas au son)
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
-    RetuneVocoder retuner;                // RETUNE (case à cocher) : vocodeur sur les notes de la gamme, 0 latence
     PitchShifter pitcher;                 // PITCH −12…+12 (elastic), en fin de chaîne
-    CutEq cutEq;                          // EQ isoler / couper (poignées du spectrum), juste avant le limiteur
+    ProEq proEq;                          // EQ façon Pro-Q (partie spectrum), juste avant le limiteur
     std::atomic<float>* eqLowParam = nullptr;
     std::atomic<float>* eqHighParam = nullptr;
+    std::atomic<float>* eqBellHzParam[3] {};
+    std::atomic<float>* eqBellDbParam[3] {};
+    std::atomic<float>* eqBellQParam[3] {};
     juce::AudioBuffer<float> outBuffer;   // sortie avant EQ + limiteur
 
     std::atomic<float>* harmoParam = nullptr;
     std::atomic<float>* pitchParam = nullptr;
     std::atomic<float>* reverbParam = nullptr;
     std::atomic<float>* gainParam = nullptr;
-    std::atomic<float>* retuneParam = nullptr;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGain;
     float reverbSmoothed = 0.3f;          // REVERB lissé de bloc en bloc
     std::atomic<bool> prepared { false }; // prepareToPlay a été appelé

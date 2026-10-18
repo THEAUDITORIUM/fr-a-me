@@ -27,7 +27,6 @@ int main (int argc, char** argv)
 
     if (auto* note = proc.apvts.getParameter (ParamIDs::note)) note->setValueNotifyingHost (note->convertTo0to1 (9.0f)); // a
     if (auto* mode = proc.apvts.getParameter (ParamIDs::mode)) mode->setValueNotifyingHost (1.0f);                      // minor
-    if (auto* rt = proc.apvts.getParameter (ParamIDs::retune)) rt->setValueNotifyingHost (1.0f);                      // retune coché
     if (auto* pt = proc.apvts.getParameter (ParamIDs::pitch)) pt->setValueNotifyingHost (pt->convertTo0to1 (0.0f));
 
     // EQ du spectrum (optionnel) : sortie.png largeur thème low_hz high_hz
@@ -35,6 +34,10 @@ int main (int argc, char** argv)
     {
         if (auto* lo = proc.apvts.getParameter (ParamIDs::eqLow))  lo->setValueNotifyingHost (lo->convertTo0to1 ((float) juce::String (argv[4]).getDoubleValue()));
         if (auto* hi = proc.apvts.getParameter (ParamIDs::eqHigh)) hi->setValueNotifyingHost (hi->convertTo0to1 ((float) juce::String (argv[5]).getDoubleValue()));
+        // démonstration : cloche 2 à +6 dB vers 1.2 kHz, cloche 3 à −5 dB vers 5 kHz
+        auto set = [&proc] (const char* id, float v) { if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+        set (ParamIDs::eqBellHz[1], 1200.0f); set (ParamIDs::eqBellDb[1], 6.0f);
+        set (ParamIDs::eqBellHz[2], 5000.0f); set (ParamIDs::eqBellDb[2], -5.0f); set (ParamIDs::eqBellQ[2], 2.0f);
     }
     if (argc > 3) proc.setTheme (argv[3]);                                   // sun / garden
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
