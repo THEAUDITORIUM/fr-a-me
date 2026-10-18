@@ -154,8 +154,11 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     harmoSmoothed.reset (sampleRate, 0.05);            // 50 ms de lissage : pas de clic
     harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
     preHarmoBuffer.setSize (2, maxChunk, false, true, false);
-    pitcher.prepare (sampleRate);
+    pitcher.prepare (sampleRate, maxChunk);
     keyDetector.prepare (sampleRate);                  // SCAN : analyse de l'entrée (seulement pendant un scan)
+    holdIn  = 1.0f - std::exp (-1.0f / (0.03f * (float) sampleRate));   // vers le son d'origine : 30 ms
+    holdOut = 1.0f - std::exp (-1.0f / (0.15f * (float) sampleRate));   // retour de l'effet : 150 ms
+    holdSmoothed = scanHold.load() ? 1.0f : 0.0f;
     proEq.prepare (sampleRate);
     outBuffer.setSize (2, maxChunk, false, true, false);
 
@@ -295,6 +298,8 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
+    pitcher.process (wetView, numChannels,                   // 2. PITCH (partiel par partiel), contourné à 0 ;
+                     juce::jlimit (-12.0f, 12.0f, finiteOrZero (pitchParam->load())));   //    avant l'harmonie : reste dans la gamme
     for (int c = 0; c < numChannels; ++c)                    // (copie pour le dosage HARMO)
         preHarmoBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
     snapper.process (wetView, numChannels, 1.0f);            // 3a. partiels tenus recalés sur la gamme
@@ -311,8 +316,6 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         }
     }
 
-    pitcher.process (wetView, numChannels,                   // 4. PITCH (elastic), contourné à 0
-                     juce::jlimit (-12.0f, 12.0f, finiteOrZero (pitchParam->load())));
    #ifdef FRAME_TEST_SIMULATE_WET_LOSS
     wetView.applyGain (0.03f);                               // test du garde-fou uniquement (jamais dans le plugin)
    #endif
@@ -392,9 +395,16 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
         if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
 
+        // SCAN : pendant l'écoute, on n'entend que le son d'origine (brut).
+        const float holdTarget = scanHold.load (std::memory_order_relaxed) ? 1.0f : 0.0f;
+        holdSmoothed += (holdTarget - holdSmoothed) * (holdTarget > holdSmoothed ? holdIn : holdOut);
+        if (holdSmoothed < 1.0e-5f) holdSmoothed = 0.0f;
+
         for (int c = 0; c < numChannels; ++c)
         {
-            const float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid);
+            float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid);
+            if (holdSmoothed > 0.0f)
+                y += holdSmoothed * (dryBuffer.getSample (c, i) - y);
             buffer.setSample (c, startSample + i, y);
             outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
         }
@@ -444,8 +454,22 @@ void FrameAudioProcessor::setIntroDone (bool d)
     apvts.state.setProperty ("introDone", d, nullptr);
 }
 
+void FrameAudioProcessor::startScan()
+{
+    scanHold.store (true);
+    keyDetector.start();
+}
+
+void FrameAudioProcessor::cancelScan()
+{
+    keyDetector.cancel();
+    scanHold.store (false);
+}
+
 void FrameAudioProcessor::applyDetectedKey (int tonic, int mode)
 {
+    // L'effet revient (fondu de 150 ms) une fois la tonalité réglée.
+    struct Release { std::atomic<bool>& h; ~Release() { h.store (false); } } release { scanHold };
     // Fil interface : tonique et mode réglés comme si on cliquait (geste complet,
     // l'hôte enregistre le changement et l'automation reste cohérente).
     if (tonic < 0 || tonic > 11) return;

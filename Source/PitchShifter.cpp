@@ -7,12 +7,12 @@
 #include "PitchShifter.h"
 #include <cmath>
 
-void PitchShifter::prepare (double newSampleRate)
+void PitchShifter::prepare (double newSampleRate, double windowSeconds)
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
-    window = 0.045 * sampleRate;
-    maxOffset = (int) (0.016 * sampleRate);     // recherche de phase : jusqu'à ~16 ms (période de 62 Hz)
-    corrLen   = (int) (0.010 * sampleRate);     // segment comparé : 10 ms
+    window = juce::jlimit (0.005, 0.1, windowSeconds) * sampleRate;
+    maxOffset = (int) (juce::jmin (0.016, 0.35 * windowSeconds) * sampleRate);     // recherche de phase : jusqu'à ~16 ms (période de 62 Hz)
+    corrLen   = (int) (juce::jmin (0.010, 0.25 * windowSeconds) * sampleRate);     // segment comparé : 10 ms
     size = (int) (window * 2.0) + maxOffset + corrLen + 16;
     for (auto& l : line)
         l.assign ((size_t) size, 0.0f);

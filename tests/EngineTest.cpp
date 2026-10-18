@@ -22,6 +22,7 @@
 #include "../Source/PartialSnapper.h"
 #include "../Source/KeyDetector.h"
 #include "../Source/PitchShifter.h"
+#include "../Source/TonalPitchShifter.h"
 
 #include <cstdio>
 #include <random>
@@ -817,7 +818,7 @@ int main (int argc, char** argv)
             return std::make_tuple (kd.getTonic(), kd.getMode(), kd.isDone());
         };
         int okSets = 0, total = 0;
-        for (auto [t, m] : { std::pair { 7, false }, std::pair { 4, true }, std::pair { 6, false }, std::pair { 1, true }, std::pair { 10, false }, std::pair { 2, true } })
+        for (auto [t, m] : { std::pair { 7, false }, std::pair { 4, true }, std::pair { 6, false }, std::pair { 1, true }, std::pair { 10, false }, std::pair { 2, true }, std::pair { 9, true }, std::pair { 3, false } })
         {
             const auto [dt, dm, done] = renderKey (t, m);
             const bool sameSet = dt >= 0 && frame::scaleMask (dt, dm ? frame::Mode::minor : frame::Mode::major)
@@ -826,7 +827,79 @@ int main (int argc, char** argv)
                          dt >= 0 ? frame::noteNames[dt] : "?", dm ? "minor" : "major", sameSet ? "" : "  (gamme différente)");
             okSets += (sameSet && done) ? 1 : 0; ++total;
         }
-        check (okSets == total, "scan : la bonne gamme est trouvée (6 tonalités)");
+        check (okSets == total, "scan : la bonne gamme est trouvée (8 tonalités)");
+    }
+
+    // ---- 15. PITCH 3.1 : transposition partiel par partiel ---------------------
+    {
+        std::printf ("15. pitch partiel par partiel (0 latence)\n");
+        auto runTP = [&] (juce::AudioBuffer<float>& b, float st)
+        {
+            TonalPitchShifter tp; tp.prepare (sr, 512);
+            for (int pos = 0; pos < b.getNumSamples(); pos += 512)
+            {
+                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, b.getNumSamples() - pos));
+                tp.process (v, 2, st);
+            }
+        };
+        for (float st : { 12.0f, 7.0f, -5.0f, -12.0f, 3.0f })
+        {
+            const int len = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, len); b.clear(); sine (b, 220.0, 0.4f);
+            const float before = b.getRMSLevel (0, len / 2, len / 2);
+            runTP (b, st);
+            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
+            const double expect = 220.0 * std::exp2 (st / 12.0);
+            const double cents = 1200.0 * std::log2 (hz / expect);
+            const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / before);
+            std::printf ("     %+3.0f st : %.2f Hz (attendu %.2f, %+.2f cents), niveau %+.2f dB, résidu %.0f dB\n", st, hz, expect, cents, lvl, resid);
+            check (std::abs (cents) < 2.0 && std::abs (lvl) < 1.0f && resid < -30.0, "transposition juste et propre");
+        }
+        {
+            const int len = (int) sr;
+            juce::AudioBuffer<float> b (2, len);
+            std::mt19937 rng (2); std::normal_distribution<float> nd (0.0f, 0.1f);
+            for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n) b.setSample (c, n, nd (rng));
+            const auto ref = b;
+            runTP (b, 0.0f);
+            float diff = 0; for (int n = 0; n < len; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
+            check (diff < 1.0e-7f, "pitch 0 : son strictement inchangé");
+        }
+        {
+            // attaques : un clic ressort une seule fois (pas de doublement) ; vers le
+            // bas à l'heure, vers le haut avec au plus (rapport − 1) × 12 ms.
+            for (float st : { -5.0f, 7.0f, 12.0f })
+            {
+                juce::AudioBuffer<float> b (2, (int) sr); b.clear();
+                for (int k = 0; k < 4; ++k) for (int n = 0; n < 40; ++n) { const float v = 0.9f * std::exp (-n / 8.0f) * (n % 2 ? -1.0f : 1.0f); b.setSample (0, 4000 + k * 9000 + n, v); b.setSample (1, 4000 + k * 9000 + n, v); }
+                runTP (b, st);
+                const double maxDelay = juce::jmax (0.0, std::exp2 (st / 12.0) - 1.0) * 0.012 * sr + 0.001 * sr;
+                int worst = 0; float echo = 0.0f;
+                for (int k = 0; k < 4; ++k)
+                {
+                    const int at = 4000 + k * 9000;
+                    int p = at; for (int n = at - 50; n < at + 2000; ++n) if (std::abs (b.getSample (0, n)) > std::abs (b.getSample (0, p))) p = n;
+                    worst = juce::jmax (worst, p - at);
+                    for (int n = p + (int) (0.002 * sr); n < at + 2000; ++n) echo = juce::jmax (echo, std::abs (b.getSample (0, n)) / std::abs (b.getSample (0, p)));
+                }
+                std::printf ("     clics %+3.0f st : décalage %d éch. (max permis %d), écho %.0f dB\n", st, worst, (int) maxDelay, juce::Decibels::gainToDecibels (echo));
+                check (worst <= (int) maxDelay && worst >= -2 && echo < 0.3f, "attaques nettes, une seule fois");
+            }
+        }
+        {
+            TonalPitchShifter tp; tp.prepare (sr, 128);
+            juce::AudioBuffer<float> b (2, 128);
+            std::mt19937 rng (8); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+            bool finite = true; float peak = 0;
+            for (int blk = 0; blk < (int) (6 * sr / 128); ++blk)
+            {
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) b.setSample (c, n, (blk % 30 < 15 ? 0.9f : 0.02f) * u (rng));
+                tp.process (b, 2, (float) ((blk / 20) % 25 - 12));
+                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
+            }
+            std::printf ("     automation brutale : crête %.2f\n", peak);
+            check (finite && peak < 4.0f, "pitch stable sous automation brutale");
+        }
     }
 
     std::printf ("\n%s (%d échec%s)\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "ÉCHECS", failures, failures > 1 ? "s" : "");

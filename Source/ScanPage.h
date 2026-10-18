@@ -9,10 +9,11 @@
     Rouvrable à tout moment avec le petit bouton « scan key » de la planche.
 
       • repos      : « appuyez sur scan, puis jouez votre mélodie »
-      • écoute     : anneau de progression (~6 s de son joué), tonalité en
+      • écoute     : anneau de progression (~8 s de son joué), tonalité en
                      direct ; un clic sur le bouton arrête et garde le résultat
       • terminé    : la tonalité trouvée, appliquée ; « rescan » ou ouverture
-                     automatique de la planche après 2.5 s
+                     automatique de la planche après 5 s ; deux autres tonalités
+                     proposées en un clic
   ==============================================================================
 */
 
@@ -53,6 +54,8 @@ private:
     State state = State::idle;
     float progress = 0.0f, pulse = 0.0f;
     int tonic = -1, mode = 0;
+    int altTonic[2] { -1, -1 }, altMode[2] { 0, 0 };     // deux autres tonalités proposées
+    juce::Rectangle<float> altBounds (int i) const noexcept;
     int listeningTicks = 0, doneTicks = 0;
     bool hoverButton = false;
 };

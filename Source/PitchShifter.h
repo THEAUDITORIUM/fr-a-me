@@ -27,7 +27,7 @@
 class PitchShifter
 {
 public:
-    void prepare (double sampleRate);
+    void prepare (double sampleRate, double windowSeconds = 0.045);
     void reset() noexcept;
 
     /** semitones : −12 … +12. Traite en place. */

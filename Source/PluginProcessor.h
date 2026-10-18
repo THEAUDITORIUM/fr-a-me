@@ -12,7 +12,7 @@
 #include "SpectralEngine.h"
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
-#include "PitchShifter.h"
+#include "TonalPitchShifter.h"
 #include "PartialSnapper.h"
 #include "KeyDetector.h"
 #include "ProEq.h"
@@ -89,7 +89,13 @@ public:
 
     /** SCAN : détection de tonalité (lancée et lue par l'interface). */
     KeyDetector& getKeyDetector() noexcept { return keyDetector; }
+    /** Lance un scan : pendant l'écoute, la sortie est le son d'origine seul. */
+    void startScan();
+    /** Arrête un scan sans rien appliquer : l'effet revient. */
+    void cancelScan();
+    /** Applique la tonalité trouvée puis rend l'effet (fondu). */
     void applyDetectedKey (int tonic, int mode);
+    bool isScanHolding() const noexcept { return scanHold.load(); }
     /** Page d'accueil (scan) déjà passée pour cette instance (sauvegardé avec le projet). */
     bool isIntroDone() const;
     void setIntroDone (bool);
@@ -117,9 +123,11 @@ private:
     SpectralEngine engine;                // analyse pour l'affichage (ne touche pas au son)
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     KeyDetector keyDetector;              // SCAN : tonalité de la mélodie jouée
+    std::atomic<bool> scanHold { false }; // pendant un scan : sortie = son d'origine
+    float holdSmoothed = 0.0f, holdIn = 0.01f, holdOut = 0.001f;
     PartialSnapper snapper;               // recalage des partiels tenus sur la gamme (0 latence)
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
-    PitchShifter pitcher;                 // PITCH −12…+12 (elastic), en fin de chaîne
+    TonalPitchShifter pitcher;            // PITCH −12…+12 : partiel par partiel, AVANT l'harmonie (le son transposé reste dans la gamme)
     ProEq proEq;                          // EQ façon Pro-Q (partie spectrum), juste avant le limiteur
     std::atomic<float>* eqLowParam = nullptr;
     std::atomic<float>* eqHighParam = nullptr;

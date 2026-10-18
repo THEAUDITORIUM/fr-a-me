@@ -29,6 +29,7 @@ juce::Rectangle<float> ScanPage::buttonBounds() const noexcept
     return { pageW * 0.5f - 120.0f, 230.0f, 240.0f, 240.0f };
 }
 
+juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 190.0f + 200.0f * (float) i, 556.0f, 170.0f, 28.0f }; }
 juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 190.0f, 600.0f, 170.0f, 34.0f }; }
 juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 20.0f, 600.0f, 170.0f, 34.0f }; }
 
@@ -45,8 +46,8 @@ void ScanPage::open()
 
 void ScanPage::close()
 {
-    auto& kd = processor.getKeyDetector();
-    if (kd.isScanning()) kd.cancel();
+    if (processor.isScanHolding() || processor.getKeyDetector().isScanning())
+        processor.cancelScan();                     // l'effet revient
     processor.setIntroDone (true);
     setVisible (false);
     if (onClose) onClose();
@@ -54,9 +55,13 @@ void ScanPage::close()
 
 void ScanPage::finish()
 {
+    auto& kd = processor.getKeyDetector();
+    for (int i = 0; i < 2; ++i) { altTonic[i] = kd.getAltTonic (i); altMode[i] = kd.getAltMode (i); }
     // Résultat appliqué au plugin (tonique + mode).
     if (tonic >= 0)
-        processor.applyDetectedKey (tonic, mode);
+        processor.applyDetectedKey (tonic, mode);   // tonalité réglée, puis l'effet revient
+    else
+        processor.cancelScan();
     state = State::done;
     doneTicks = 0;
     repaint();
@@ -80,7 +85,7 @@ void ScanPage::update()
     }
     else if (state == State::done)
     {
-        if (++doneTicks > 75)          // ~2.5 s : la planche s'ouvre d'elle-même
+        if (++doneTicks > 150)         // ~5 s : la planche s'ouvre d'elle-même
             close();
         else
             repaint (continueBounds().expanded (4.0f).toNearestInt());
@@ -90,7 +95,8 @@ void ScanPage::update()
 void ScanPage::mouseMove (const juce::MouseEvent& e)
 {
     const bool over = buttonBounds().contains (e.position)
-                   || (state == State::done && (rescanBounds().contains (e.position) || continueBounds().contains (e.position)))
+                   || (state == State::done && (rescanBounds().contains (e.position) || continueBounds().contains (e.position)
+                                                || altBounds (0).contains (e.position) || altBounds (1).contains (e.position)))
                    || juce::Rectangle<float> (pageW * 0.5f - 60.0f, 680.0f, 120.0f, 26.0f).contains (e.position);
     setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
     const bool hb = buttonBounds().contains (e.position);
@@ -104,9 +110,20 @@ void ScanPage::mouseUp (const juce::MouseEvent& e)
 
     if (state == State::done)
     {
+        for (int i = 0; i < 2; ++i)
+            if (altTonic[i] >= 0 && altBounds (i).contains (pos))
+            {
+                // Une autre proposition : elle devient la tonalité, l'ancienne passe en alternative.
+                std::swap (tonic, altTonic[i]);
+                std::swap (mode, altMode[i]);
+                processor.applyDetectedKey (tonic, mode);
+                doneTicks = -150;                  // laisse le temps d'écouter (~5 s de plus)
+                repaint();
+                return;
+            }
         if (rescanBounds().contains (pos) || buttonBounds().contains (pos))
         {
-            kd.start();
+            processor.startScan();
             state = State::listening; listeningTicks = 0; progress = 0.0f; tonic = -1;
             repaint();
         }
@@ -119,14 +136,14 @@ void ScanPage::mouseUp (const juce::MouseEvent& e)
     {
         if (state == State::idle)
         {
-            kd.start();
+            processor.startScan();
             state = State::listening; listeningTicks = 0; progress = 0.0f; tonic = -1;
         }
         else    // en écoute : arrêt ; on garde le résultat s'il y a assez de son
         {
             kd.cancel();
             if (progress > 0.25f && tonic >= 0) finish();
-            else state = State::idle;
+            else { processor.cancelScan(); state = State::idle; }
         }
         repaint();
         return;
@@ -224,7 +241,7 @@ void ScanPage::paint (juce::Graphics& g)
     else
     {
         line1 = "tonic & mode set : " + keyName (tonic, mode);
-        line2 = "you can change it any time below the plate";
+        line2 = "not quite ? try one of these :";
     }
     drawMonoText (g, line1, { 0.0f, 506.0f, pageW, 18.0f }, 13.0f, J::centred, Palette::ink);
     drawMonoText (g, line2, { 0.0f, 530.0f, pageW, 16.0f }, 10.5f, J::centred, Palette::graphite);
@@ -238,12 +255,20 @@ void ScanPage::paint (juce::Graphics& g)
             g.drawRoundedRectangle (rr, 17.0f, 0.9f);
             drawMonoText (g, t, rr, 12.0f, J::centred, Palette::ink, filled);
         };
+        for (int i = 0; i < 2; ++i)
+            if (altTonic[i] >= 0)
+            {
+                const auto ab = altBounds (i);
+                g.setColour (Palette::pencil);
+                g.drawRoundedRectangle (ab, 14.0f, 0.7f);
+                drawMonoText (g, "or  " + keyName (altTonic[i], altMode[i]), ab, 11.0f, J::centred, Palette::graphite);
+            }
         pill (rescanBounds(), "rescan", false);
         pill (continueBounds(), "open fr(a)me  >", true);
         // petite jauge de l'ouverture automatique
         const auto cb = continueBounds();
         g.setColour (Palette::accentInk);
-        g.fillRect (cb.getX() + 17.0f, cb.getBottom() + 6.0f, (cb.getWidth() - 34.0f) * juce::jmin (1.0f, (float) doneTicks / 75.0f), 1.5f);
+        g.fillRect (cb.getX() + 17.0f, cb.getBottom() + 6.0f, (cb.getWidth() - 34.0f) * juce::jlimit (0.0f, 1.0f, (float) doneTicks / 150.0f), 1.5f);
     }
     else
     {

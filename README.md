@@ -163,7 +163,9 @@ frame/
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
 │   ├── ProEq.*               EQ façon Pro-Q : coupes 24 dB/oct + 3 cloches (0 latence)
-│   ├── PitchShifter.*        PITCH : transposition elastic (SOLA)
+│   ├── TonalPitchShifter.*   PITCH : transposition partiel par partiel (0 latence)
+│   ├── GrainShifter.*        PITCH : grains courts pour les attaques et les bruits
+│   ├── PitchShifter.*        ancien décaleur à têtes (gardé pour les tests)
 │   ├── PartialSnapper.*      recalage des partiels tenus sur la gamme (0 latence)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── KeyDetector.*         SCAN : détection de la tonalité de l'entrée
@@ -208,12 +210,18 @@ tenue désaccordée de +39 cents 1 % → 99 % ; glissando 32 % → 100 % ; vibra
 désaccordés recalés, niveau conservé à ±1 dB, plus de pompage. Traînées entre les accords
 divisées par plus de deux (+6 dB au lieu de +10 dB).
 
-**SCAN** (`KeyDetector`) : pendant un scan, l'entrée est analysée par FFT (8192 points) ;
-les pics (70 Hz – 5 kHz) donnent un profil des 12 notes. On choisit d'abord la **gamme**
-(les 7 notes qui contiennent le plus d'énergie — c'est ce qui compte pour le son), puis la
-**tonique** dans cette gamme (majeur ou relatif mineur, par la basse et les profils
-d'Albrecht & Shanahan). Le scan s'arrête après ~6 s de son joué (les silences ne comptent
-pas). Testé sur des progressions dans 22 tonalités : la bonne gamme à chaque fois.
+**SCAN 3.1** (`KeyDetector`) : pendant un scan, on n'entend **que le son d'origine** (rien de
+fr(a)me) ; une fois la tonalité trouvée et appliquée, l'effet revient en fondu (150 ms).
+L'entrée est analysée par FFT (8192 points) : pics de 70 Hz à 5 kHz, **harmoniques écartées**
+(×3, ×5, ×6, ×7 d'un pic plus grave — elles poussaient vers la quinte), **accordage estimé**
+(histogramme à 10 cents : un sample à +35 cents n'est plus mal lu), puis score des 24
+tonalités (profils d'Albrecht & Shanahan + part d'énergie dans la gamme + basse). ~8 s de son
+joué. Sur 260 morceaux de test (mélodies seules, accords, arpèges, pentatoniques, 5 timbres,
+accordages décalés jusqu'à ±45 cents) : la bonne gamme dans 88 % des cas (sur les 60
+premiers : 90 %, contre 62 % pour le scan de la 3.0), la bonne tonalité parmi les 3
+premières dans 94 % — les deux autres sont proposées en un clic
+sur la page de scan. Les erreurs restantes sont surtout des mélodies pentatoniques ou des
+arpèges de 3 notes, réellement ambigus.
 
 **Analyse.** STFT à fenêtre de Hann, N = 4096 points à 44.1/48 kHz (8192 à 88.2/96 kHz,
 16384 au-delà, pour garder ~11 Hz de résolution), recouvrement 75 % (hop = N/4).
@@ -289,13 +297,24 @@ correspond au son (cloche +12 dB mesurée à +12.0 dB).
 **HARMO** (ancien MIX, 0–100 %) : dose uniquement le traitement harmonique (peigne +
 harmoniques justes) ; à 100 % le son est celui de la 2.0.0. À 0 %, la réverbe, l'EQ,
 le pitch et le gain fonctionnent toujours : chaque bouton agit seul, et ensemble ils
-s'enchaînent dans cet ordre — reverb → harmo → pitch → gain → EQ — pour que tout ce qui
+s'enchaînent dans cet ordre — reverb → pitch → harmo → gain → EQ — pour que tout ce qui
 est ajouté (queue, porteuses) passe dans la gamme.
 
-**PITCH** (−12 … +12 demi-tons, 0 par défaut), façon elastic pitch : la hauteur change, pas
-la durée. Deux têtes de lecture fondues, dont le point de reprise est choisi par corrélation
-(type SOLA) : transposition exacte (±0.2 cent mesuré à ±12, +7, −5), niveau conservé, pas de
-saut de phase. À 0, contourné : son strictement inchangé.
+**PITCH 3.1** (−12 … +12 demi-tons, 0 par défaut), refait entièrement, sans latence :
+- placé **avant l'harmonie** : le son transposé est ensuite recalé dans la gamme choisie
+  (en 3.0 le pitch était en fin de chaîne et sortait tout de la tonalité — à +3 demi-tons,
+  28 % seulement des partiels restaient dans la gamme ; en 3.1 : 86 à 97 %) ;
+- **partiel par partiel** (`TonalPitchShifter`) : ~80 bandes analytiques (4 pôles complexes,
+  un demi-ton chacune, plus larges dans le grave) mesurent la fréquence réelle de chaque
+  partiel tonal, qui est retiré du son et remis exactement à ratio × sa fréquence (rotation
+  de phase continue : pas de grains, pas de flottement, harmoniques conservées). Mesuré :
+  ±0.2 cent à ±12, +7, −5, +3, niveau ±0.01 dB, résidu −48 à −70 dB ;
+- le **reste** (attaques, souffle, bruits) passe par des grains de 12 ms redémarrés à chaque
+  attaque (`GrainShifter`) : chaque attaque sort une seule fois (écho −25 à −42 dB), à
+  l'heure vers le bas, avec au plus (rapport − 1) × 12 ms vers le haut (3 ms à +3, 6 ms à
+  +7) — l'ancien pitch décalait les attaques d'environ 28 ms ;
+- quand le son est surtout tonal, ce reste est atténué pour ne pas battre avec les partiels.
+À 0, contourné : son strictement inchangé.
 
 **Thème** : un seul, garden — fond blanc, encre de mousse, vert d'herbe, quelques touches de
 rose ; trois aplats d'herbe couchée dans les marges et un brin au crayon.
