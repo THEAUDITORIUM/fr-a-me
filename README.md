@@ -9,7 +9,7 @@ règle tonique + mode), **harmo** (0–100 %, recalage des notes tenues + peigne
 **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12
 demi-tons, elastic), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
 dans la partie spectrum (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
-(−24 … +12 dB, petit bouton en haut à droite). Thème unique : garden.
+(−24 … +12 dB, petit bouton en haut à droite, à côté de **scan key**). Thème unique : garden.
 Tous automatisables et sauvegardés avec le projet.
 
 | page de scan (au lancement) | la planche |
@@ -173,7 +173,7 @@ frame/
 │   ├── Scale.h               gammes (masque 12 notes) et note la plus proche
 │   ├── LockFreeQueue.h       FIFO sans verrou audio → interface
 │   ├── PluginEditor.*        la planche : mise en page, annotations, mise à l'échelle
-│   ├── Visualisers.*         bandes input / output / spectrum / partials
+│   ├── Visualisers.*         bandes sound (brut + traité) / spectrum / partials
 │   ├── Controls.*            bascule major/minor, bouton « scan key », rangée des 12 notes, EQ façon Pro-Q (EqView)
 │   └── FrameLookAndFeel.*    palette, typographie, potentiomètre
 ├── Resources/fonts/          IBM Plex Mono (licence SIL OFL, voir OFL.txt)
@@ -183,6 +183,26 @@ frame/
 ---
 
 ## 4. Le traitement en détail
+
+**3.2 — harmo plus forte, et la floraison.** Réglée sur des morceaux longs (deux exemples
+de 30 s comparés à Chroma : part de l'énergie sur les notes de la gamme, énergie « entre
+deux notes », niveaux par bande), sans copier : fr(a)me garde son identité et y ajoute une
+couche à lui.
+
+- *Les basses aussi* : le recalage des partiels commence dès 50 Hz (avant 110 Hz) et le
+  peigne est plein dès 200 Hz (avant 700 Hz) ; les basses fausses passent dans la tonalité.
+- *Recalage plus large* : les partiels moins nets (tonalité ≥ 0.45 au lieu de 0.70) sont
+  aussi recalés, les régions de chaque note sont élargies de 30 %, et un partiel partagé
+  par deux bandes n'est déplacé qu'une fois (par la bande où il sonne le plus).
+- *Relief* : +5 dB de présence sur les notes de la gamme autour de 1 kHz (courbe douce sur
+  ±1.3 octave), pour que les lignes mélodiques ressortent.
+- *Floraison* (nouveau) : un halo de résonateurs très fins (8 cents) sur chaque note de la
+  gamme de 250 Hz à ~5 kHz, nourri par le son traité. Les notes tenues fleurissent et
+  se prolongent un peu, chaque note respire lentement (0.1 – 0.35 Hz, ±18 %) et les notes
+  sont réparties une à gauche, une à droite : l'accord s'ouvre dans la stéréo. Toujours à
+  0 latence, stable (filtres passe-bande de gain 1), dosé par **harmo**.
+- Mesuré sur les deux exemples : 98 % de l'énergie sur les notes de la gamme (88 % en 3.1),
+  1.2 – 2.2 % entre deux notes (6 – 11 % en 3.1), contraste notes / hors-notes +2 à +3 dB.
 
 **3.0 — l'harmonie sur les sons longs.** Toute la chaîne reste à **0 latence** (vérifié à
 l'échantillon près sur un train de clics, avec et sans reverb, harmo à 0 ou 100 %).
@@ -372,23 +392,24 @@ environ 2.5 % d'un cœur en stéréo à 48 kHz (build Release).
 Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à l'échelle
 (720 px de large par défaut ; redimensionnez par le coin inférieur droit, de 520 à 1500 px).
 
-- **input** : forme d'onde noire du signal entrant ;
-- **output** : forme d'onde verte du signal traité ;
+- **sound** : le son brut (gris) et le son dans la tonalité (vert) superposés ;
 - **spectrum** : EQ façon Pro-Q (fréquences de gauche à droite) sur l'analyseur du son de
   sortie, avec la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
-  jaune si le pic a été recalé ;
+  vert si le pic a été recalé ;
 - en bas, trois gros boutons : **harmo** (double-clic = 100 %), **reverb** (double-clic =
-  30 %), **pitch** (double-clic = 0) ; **mode** (clic sur le mot) et le bouton **scan key**
-  (rouvre la page de scan) ; **tonic** (clic ou glisser le long de la rangée ; un point
+  30 %), **pitch** (double-clic = 0) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
   marque chaque note de la gamme) ;
-- en haut à droite : **gain** (double-clic = 0 dB).
+- en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
+
+3.2 : planche épurée — une seule bande de son au lieu de deux, plus d'échelles ni de
+rappels sur les bandes, scan key monté à côté du gain.
 
 À l'ouverture d'une nouvelle instance, la **page de scan** s'affiche : gros bouton « scan »,
 on joue la mélodie dans le DAW, la tonalité est trouvée et appliquée, puis la planche
 s'ouvre (« skip » pour entrer directement).
 
-Les quatre bandes partagent le même axe temporel (~9 s, « now » à droite).
+Les bandes partagent le même axe temporel (~9 s, « now » à droite).
 
 ---
 

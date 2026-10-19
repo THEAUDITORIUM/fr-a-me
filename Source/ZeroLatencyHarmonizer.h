@@ -72,6 +72,13 @@ private:
     {
         double hz = 0.0, q = 10.0, qCut = 2.0;   // cloche (note de la gamme) / creux (note hors gamme)
         bool inScale = false;
+        // FLORAISON : résonateur très fin sur la note (halo qui prolonge et fait
+        // respirer les notes de la gamme), placé à gauche ou à droite.
+        Biquad bloom;
+        float bloomWeight = 0.0f, bloomGain = 0.0f, bloomTarget = 0.0f;
+        float panL = 1.0f, panR = 1.0f;
+        float bloomOut[2] { 0.0f, 0.0f };          // gain final par canal (mis à jour toutes les 32 éch.)
+        double lfoPhase = 0.0, lfoInc = 0.0;
         float freqWeight = 0.0f;          // présence du peigne selon la fréquence (fixe)
         float harmWeight = 0.0f;          // présence des harmoniques selon la fréquence (fixe)
         Biquad bell;                      // cloche du peigne (recalculée quand le gain change)
@@ -120,4 +127,7 @@ private:
     double compHz[numComp] {};
     void computeCompensation() noexcept;
     double peakingDb (double centreHz, double q, double gainDb, double atHz) const noexcept;
+    static float presenceDb (double hz) noexcept;
+    float bloomSmooth = 0.001f;
+    std::vector<int> bloomList;                    // notes dont la floraison sonne (réservé dans prepare)
 };

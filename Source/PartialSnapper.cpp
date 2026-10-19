@@ -23,8 +23,11 @@ namespace
    #ifndef PS_FAST
     #define PS_FAST 0.006        // fenêtre de cohérence (s)
    #endif
+   #ifndef PS_LOWHZ
+    #define PS_LOWHZ 50.0        // le recalage commence ici (plein au double)
+   #endif
    #ifndef PS_KMIN
-    #define PS_KMIN 0.70f        // tonalité en dessous de laquelle rien n'est recalé (bruit, attaques)
+    #define PS_KMIN 0.45f        // tonalité en dessous de laquelle rien n'est recalé (bruit, attaques)
    #endif
    #ifndef PS_LAG
     #define PS_LAG 0.008         // écart de la mesure de tonalité (s) : un partiel reste cohérent, un bruit non
@@ -137,8 +140,12 @@ void PartialSnapper::buildBank (Bank& bank, uint16_t m) noexcept
         b.rot = std::polar (1.0, b.w);
         b.deadZone = std::sin (b.w * (std::exp2 (6.0 / 1200.0) - 1.0));
         b.pole = b.radius * b.rot;
-        b.lo = std::polar (1.0, wLo);
-        b.hi = std::polar (1.0, wHi);
+        // Zones élargies de 30 % de part et d'autre : un partiel posé pile entre
+        // deux notes (son accordé un quart de ton à côté) reste recalé ; la
+        // bande la plus forte des deux le prend (voir « partagé »).
+        b.lo = std::polar (1.0, wLo - 0.3 * (b.w - wLo));
+        b.hi = std::polar (1.0, wHi + 0.3 * (wHi - b.w));
+        b.estW = b.w;
         b.s1[0] = b.s1[1] = b.s2[0] = b.s2[1] = {};
         b.zPrev = {}; b.dFast = {}; b.dSlow = {}; b.mFast = 0.0;
         b.lagCorr = {}; b.lagEnergy = 0.0;
@@ -149,7 +156,7 @@ void PartialSnapper::buildBank (Bank& bank, uint16_t m) noexcept
 
         // Progressif dans le grave (110 → 200 Hz), allégé au-dessus de 5 kHz.
         const float f = (float) hz;
-        b.freqWeight = smoothStep ((f - 110.0f) / 90.0f) * (1.0f - 0.8f * smoothStep ((f - 5000.0f) / 4000.0f));
+        b.freqWeight = smoothStep ((f - (float) PS_LOWHZ) / (float) PS_LOWHZ) * (1.0f - 0.8f * smoothStep ((f - 5000.0f) / 4000.0f));
     }
 }
 
@@ -223,7 +230,17 @@ void PartialSnapper::runBank (Bank& bank, const double* in, int nch, double* del
 
             // La bande « possède »-t-elle ce partiel ? (fréquence dans sa zone)
             const cd dHat = ns > 1.0e-30 ? b.dSlow / ns : cd (1.0, 0.0);
-            const bool owned = ns > 1.0e-30 && cross (b.lo, dHat) >= 0.0 && cross (dHat, b.hi) >= 0.0;
+            b.estW = std::arg (dHat);
+            bool owned = ns > 1.0e-30 && cross (b.lo, dHat) >= 0.0 && cross (dHat, b.hi) >= 0.0;
+            // Partagé : si la bande voisine mesure le même partiel (±10 cents) et
+            // le reçoit plus fort, c'est elle qui le recale (jamais deux fois).
+            for (int j : { i - 1, i + 1 })
+                if (owned && j >= 0 && j < bank.count)
+                {
+                    const auto& nb = bank.bands[(size_t) j];
+                    if (std::abs (nb.estW - b.estW) < 0.006 * b.estW && nb.lagEnergy > b.lagEnergy)
+                        owned = false;
+                }
             const float coherence = b.lagEnergy > 1.0e-30 ? (float) (std::abs (b.lagCorr) / b.lagEnergy) : 0.0f;
             // Dominance : une bande qui ne reçoit que les fuites de ses voisines
             // (plus fortes qu'elle) ne recale rien — sinon un mélange de deux

@@ -40,7 +40,7 @@
 class PartialSnapper
 {
 public:
-    static constexpr int lowNote  = 45;      // la2 (110 Hz)
+    static constexpr int lowNote  = 31;      // sol1 (49 Hz)
     static constexpr int highNote = 120;     // ~8.4 kHz
     static constexpr int maxBands = highNote - lowNote + 1;
 
@@ -60,7 +60,8 @@ private:
         cd pole {}, rot {};                  // pôle du résonateur, e^{jW}
         double gain = 0.0, radius = 0.0;     // gain d'entrée (1 − r) et r
         double deadZone = 0.0;               // ±6 cents, en rotation par échantillon
-        cd lo {}, hi {};                     // bornes de la zone (e^{jω})
+        cd lo {}, hi {};                     // bornes de la zone (e^{jω}), élargies de 30 % (recouvrement)
+        double estW = 0.0;                   // fréquence mesurée (rad/éch.), pour départager deux bandes voisines
         cd s1[2] {}, s2[2] {};               // états des deux résonateurs, par canal
         cd zPrev {};                         // sortie « mid » précédente
         cd dFast {}, dSlow {};               // rotation moyenne (rapide / lente)

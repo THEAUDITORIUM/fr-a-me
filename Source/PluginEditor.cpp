@@ -62,8 +62,8 @@ void FrameCanvas::setupKnob (juce::Slider& knob, const juce::String& name, doubl
 
 void FrameCanvas::resized()
 {
-    inputBand.setBounds    (inputArea.toNearestInt());
-    outputBand.setBounds   (outputArea.toNearestInt());
+    inputBand.setBounds    (soundArea.toNearestInt());     // superposées
+    outputBand.setBounds   (soundArea.toNearestInt());
     eqView.setBounds       (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     harmoKnob.setBounds  (knobArea);
@@ -122,7 +122,7 @@ void FrameCanvas::paint (juce::Graphics& g)
     g.fillAll (Palette::paper);
     drawGardenDecor (g, getLocalBounds().toFloat());
 
-    const float left = inputArea.getX(), right = inputArea.getRight();
+    const float left = soundArea.getX(), right = soundArea.getRight();
 
     // ---- En-tête -------------------------------------------------------------
     drawMonoText (g, "fr(a)me", { 0.0f, 16.0f, (float) designWidth, 34.0f }, 28.0f, J::centred, Palette::ink, true, 0.28f);
@@ -143,56 +143,23 @@ void FrameCanvas::paint (juce::Graphics& g)
     {
         drawMonoText (g, text, { band.getX(), band.getY() - 16.0f, 300.0f, 13.0f }, 11.5f, J::centredLeft, Palette::ink);
     };
-    bandLabel ("input",    inputArea);
-    bandLabel ("output",   outputArea);
+    bandLabel ("sound",    soundArea);
     bandLabel ("spectrum", spectrumArea);
     bandLabel ("partials", partialArea);
 
-    // Échelles à droite des bandes
-    auto sideNote = [&] (const juce::String& text, float y)
+    // Petites légendes à droite des étiquettes (pastille + mot).
+    auto legend = [&] (juce::Rectangle<float> band, float x, const char* text, juce::Colour c, bool filled)
     {
-        drawMonoText (g, text, { right + 8.0f, y - 6.0f, 70.0f, 12.0f }, 9.0f, J::centredLeft, Palette::graphite);
+        const float y = band.getY() - 9.5f;
+        g.setColour (c);
+        if (filled) g.fillEllipse (x, y - 3.0f, 6.0f, 6.0f);
+        else        g.drawEllipse (x, y - 3.0f, 6.0f, 6.0f, 0.8f);
+        drawMonoText (g, text, { x + 12.0f, y - 6.0f, 90.0f, 12.0f }, 9.5f, J::centredLeft, Palette::graphite);
     };
-    sideNote ("+1.0", inputArea.getY() + 4.0f);
-    sideNote ("-1.0", inputArea.getBottom() - 4.0f);
-    sideNote ("+1.0", outputArea.getY() + 4.0f);
-    sideNote ("-1.0", outputArea.getBottom() - 4.0f);
-    sideNote ("+24 db", spectrumArea.getY() + 10.0f);
-    sideNote ("0 db",   spectrumArea.getCentreY());
-    sideNote ("-24 db", spectrumArea.getBottom() - 10.0f);
-    sideNote ("12 khz", partialArea.getY() + 4.0f);
-    sideNote ("40 hz",  partialArea.getBottom() - 4.0f);
-
-
-    // ---- Rappels annotés sur les bandes (façon « highway / tree ») ------------
-    drawCallout (g, "dry signal", { right - 210.0f, inputArea.getY() - 8.0f },
-                 { right - 120.0f, inputArea.getCentreY() - 10.0f }, true);
-    drawCallout (g, "in key", { right - 190.0f, outputArea.getY() - 8.0f },
-                 { right - 120.0f, outputArea.getCentreY() - 10.0f }, true);
-
-    {
-        // Le rappel « scale frequencies » vise la ligne de la tonique la plus
-        // proche de 440 Hz : il suit la tonalité choisie.
-        const int tonic = juce::jlimit (0, 11, noteRow.getNote());
-        double midi = 60.0 + tonic;
-        if (midi < 64.0) midi += 12.0;
-        // Même échelle que l'EQ (20 Hz → 20 kHz, marge de 8 unités de chaque côté).
-        const float t = std::log ((float) frame::midiToHz (midi) / ProEq::minHz) / std::log (ProEq::maxHz / ProEq::minHz);
-        const float x = spectrumArea.getX() + 8.0f + t * (spectrumArea.getWidth() - 16.0f);
-        drawCallout (g, "scale frequencies", { x - 190.0f, spectrumArea.getY() - 8.0f },
-                     { x, spectrumArea.getY() }, true);
-    }
-
-    // Légende de la partition
-    {
-        const float y = partialArea.getY() - 9.5f;
-        g.setColour (Palette::ink);
-        g.drawEllipse (right - 214.0f, y - 3.0f, 6.0f, 6.0f, 0.8f);
-        drawMonoText (g, "detected", { right - 202.0f, y - 6.0f, 80.0f, 12.0f }, 9.5f, J::centredLeft, Palette::graphite);
-        g.setColour (Palette::accentInk);
-        g.fillEllipse (right - 104.0f, y - 3.0f, 6.0f, 6.0f);
-        drawMonoText (g, "snapped", { right - 92.0f, y - 6.0f, 80.0f, 12.0f }, 9.5f, J::centredLeft, Palette::graphite);
-    }
+    legend (soundArea,   right - 214.0f, "dry",      Palette::ink.withAlpha (0.35f), true);
+    legend (soundArea,   right - 104.0f, "in key",   Palette::accent, true);
+    legend (partialArea, right - 214.0f, "detected", Palette::ink, false);
+    legend (partialArea, right - 104.0f, "snapped",  Palette::accentInk, true);
 
     // ---- Zone des contrôles ---------------------------------------------------
     g.setColour (Palette::pencil);

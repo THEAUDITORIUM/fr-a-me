@@ -32,6 +32,21 @@ namespace
    #ifndef ZLH_MAKEUP
     #define ZLH_MAKEUP 6.0f     // rattrapage maximal (dB) pour les sons non tonals
    #endif
+   #ifndef ZLH_LOWHZ
+    #define ZLH_LOWHZ 50.0       // le peigne commence ici…
+   #endif
+   #ifndef ZLH_LOWSPAN
+    #define ZLH_LOWSPAN 150.0    // … et devient plein à LOWHZ + LOWSPAN
+   #endif
+   #ifndef ZLH_PRESENCE
+    #define ZLH_PRESENCE 5.0     // relief des notes dans les médiums (dB)
+   #endif
+   #ifndef ZLH_BLOOM
+    #define ZLH_BLOOM 0.8f      // niveau de la floraison
+   #endif
+   #ifndef ZLH_BLOOMW
+    #define ZLH_BLOOMW 8.0      // largeur des résonateurs de floraison (cents)
+   #endif
    #ifndef ZLH_H2
     #define ZLH_H2 0.5f
    #endif
@@ -66,7 +81,7 @@ void ZeroLatencyHarmonizer::prepare (double newSampleRate)
         n.qCut = 1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * (ZLH_CUTW / 1200.0)));
 
         const float f = (float) n.hz;
-        n.freqWeight = smoothStep ((f - 150.0f) / 550.0f) * (1.0f - 0.6f * smoothStep ((f - 6000.0f) / 6000.0f));
+        n.freqWeight = smoothStep ((f - (float) ZLH_LOWHZ) / (float) ZLH_LOWSPAN) * (1.0f - 0.6f * smoothStep ((f - 6000.0f) / 6000.0f));
         // Harmoniques : dès le grave (fondamentales à partir de ~60 Hz), comme la 1.4.
         n.harmWeight = smoothStep ((f - 45.0f) / 60.0f) * (1.0f - 0.7f * smoothStep ((f - 3000.0f) / 3000.0f));
         if (n.hz > nyquistLimit) n.freqWeight = n.harmWeight = 0.0f;
@@ -86,9 +101,24 @@ void ZeroLatencyHarmonizer::prepare (double newSampleRate)
         }
         n.bellGainDb = 0.0f;
         updateBell (n);
+
+        // Floraison : passe-bande (gain 1 au centre) de ~8 cents, sur les notes
+        // de 250 Hz à 5 kHz ; lente respiration propre à chaque note.
+        {
+            const double bwHz = n.hz * (std::exp2 (ZLH_BLOOMW / 1200.0) - 1.0);
+            setBandpass (n.bloom, juce::jmin (n.hz, nyquistLimit), juce::jmax (1.0, n.hz / juce::jmax (0.05, bwHz)));
+            const float fw = (float) n.hz;
+            n.bloomWeight = smoothStep ((fw - 250.0f) / 350.0f) * (1.0f - smoothStep ((fw - 3000.0f) / 3000.0f));
+            if (n.hz > nyquistLimit * 0.8) n.bloomWeight = 0.0f;
+            n.lfoInc = juce::MathConstants<double>::twoPi * (0.11 + 0.23 * std::fmod (n.hz * 0.6180339887, 1.0)) / sampleRate;
+            n.lfoPhase = std::fmod (n.hz * 2.3999632, juce::MathConstants<double>::twoPi);
+        }
     }
 
     gainSmoothDb  = 1.0f - std::exp (-32.0f / (0.12f * (float) sampleRate));   // mises à jour toutes les 32 éch.
+    bloomSmooth   = 1.0f - std::exp (-32.0f / (0.25f * (float) sampleRate));
+    bloomList.clear();
+    bloomList.reserve ((size_t) numNotes);
     gainSmoothLin = 1.0f - std::exp (-1.0f  / (0.12f * (float) sampleRate));
     gateSmooth    = 1.0f - std::exp (-1.0f  / (0.008f * (float) sampleRate));
     for (int k = 0; k < numComp; ++k)
@@ -114,6 +144,8 @@ void ZeroLatencyHarmonizer::reset() noexcept
     {
         n.bell.clear();
         n.band.clear();
+        n.bloom.clear();
+        n.bloomGain = n.bloomTarget;
         n.bPrev[0] = n.bPrev[1] = 0.0;
         n.qPrev[0] = n.qPrev[1] = 0.0;
         n.gate[0] = n.gate[1] = 0.0f;
@@ -151,8 +183,25 @@ void ZeroLatencyHarmonizer::setScale (uint16_t newMask) noexcept
         n.harmTarget   = in ? n.harmWeight : 0.0f;
         n.twelfthInScale = frame::maskContains (mask, midi + 19);
         if (in || std::abs (n.bellTargetDb) > 0.0f) n.active = true;
+        n.bloomTarget = in ? n.bloomWeight : 0.0f;
     }
+    // Floraison : notes de la gamme alternées gauche / droite (largeur).
+    int k = 0;
+    for (auto& n : notes)
+        if (n.inScale)
+        {
+            const float side = (k++ % 2 == 0 ? 1.0f : -1.0f) * 0.45f;
+            n.panL = 1.0f - side; n.panR = 1.0f + side;
+        }
     computeCompensation();
+}
+
+float ZeroLatencyHarmonizer::presenceDb (double hz) noexcept
+{
+    // Les notes de la gamme ressortent un peu plus dans les médiums (comme
+    // Chroma : les lignes harmoniques dominent entre ~300 Hz et ~3 kHz).
+    const double t = std::log2 (juce::jmax (1.0, hz) / 1000.0);          // octaves autour de 1 kHz
+    return (float) (ZLH_PRESENCE * std::exp (-0.5 * t * t / (1.3 * 1.3)));
 }
 
 double ZeroLatencyHarmonizer::peakingDb (double centreHz, double q, double gainDb, double atHz) const noexcept
@@ -209,7 +258,7 @@ void ZeroLatencyHarmonizer::computeCompensation() noexcept
             g[k] = juce::jlimit (-30.0, 6.0, g[k] - 0.7 * mean);
         }
     for (int k = 0; k < numComp; ++k)
-        compTargetDb[k] = (float) g[k];
+        compTargetDb[k] = (float) g[k] + presenceDb (compHz[k]);
 }
 
 void ZeroLatencyHarmonizer::setPeaking (Biquad& f, double hz, double q, float gainDb) const noexcept
@@ -297,8 +346,25 @@ void ZeroLatencyHarmonizer::process (juce::AudioBuffer<float>& buffer, int numCh
         // Glissement des gains de cloche (coefficients recalculés toutes les 32 éch.).
         if ((coefCounter++ & 31) == 0)
         {
-            for (auto& n : notes)
+            bloomList.clear();
+            for (int ni = 0; ni < (int) notes.size(); ++ni)
             {
+                auto& n = notes[(size_t) ni];
+                n.bloomGain += (n.bloomTarget * amount - n.bloomGain) * bloomSmooth;
+                if (n.bloomGain >= 1.0e-4f)
+                {
+                    // Respiration lente propre à la note, avancée par pas de 32 éch.
+                    n.lfoPhase += 32.0 * n.lfoInc;
+                    if (n.lfoPhase > juce::MathConstants<double>::twoPi) n.lfoPhase -= juce::MathConstants<double>::twoPi;
+                    const float g = (float) ZLH_BLOOM * n.bloomGain * (1.0f + 0.18f * (float) std::sin (n.lfoPhase));
+                    n.bloomOut[0] = g * n.panL;
+                    n.bloomOut[1] = g * n.panR;
+                    bloomList.push_back (ni);           // capacité réservée : pas d'allocation
+                }
+                else if (n.bloomTarget <= 0.0f && n.bloomGain > 0.0f)
+                {
+                    n.bloomGain = 0.0f; n.bloom.clear();
+                }
                 if (! n.active) continue;
                 const float diff = n.bellTargetDb * amount - n.bellGainDb;
                 if (std::abs (diff) > 0.005f)
@@ -412,6 +478,17 @@ void ZeroLatencyHarmonizer::process (juce::AudioBuffer<float>& buffer, int numCh
                 inE[k] += (float) (a * a);
                 outE[k] += (float) (o * o);
             }
+            // Floraison : halo de résonances fines sur les notes de la gamme.
+            double bloomSum = 0.0;
+            for (const int ni : bloomList)
+            {
+                auto& bq = notes[(size_t) ni].bloom;              // passe-bande : b1 = 0, b2 = −b0
+                const double y = bq.b0 * v + bq.z1[c];
+                bq.z1[c] = -bq.a1 * y + bq.z2[c];
+                bq.z2[c] = -bq.b0 * v - bq.a2 * y;
+                bloomSum += y * (double) notes[(size_t) ni].bloomOut[c];
+            }
+            v += bloomSum;
             data[c][i] = std::isfinite (v) ? (float) v : 0.0f;
         }
         for (int k = 0; k < numComp; ++k)

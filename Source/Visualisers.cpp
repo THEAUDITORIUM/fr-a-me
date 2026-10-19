@@ -25,15 +25,19 @@ void WaveBand::paint (juce::Graphics& g)
     const float half = b.getHeight() * 0.5f;
     const float colW = b.getWidth() / (float) historySize;
 
-    // axe central très fin
-    g.setColour (Palette::faint);
-    g.drawHorizontalLine ((int) mid, b.getX(), b.getRight());
+    // axe central très fin (une seule fois : les deux bandes sont superposées)
+    if (source == Source::input)
+    {
+        g.setColour (Palette::faint);
+        g.drawHorizontalLine ((int) mid, b.getX(), b.getRight());
+    }
 
     // Légère compression (exposant 0.7) : les passages calmes restent lisibles,
     // comme sur les planches de référence.
     auto shape = [] (float v) { return std::copysign (std::pow (juce::jmin (1.0f, std::abs (v)), 0.7f), v); };
 
-    g.setColour (source == Source::input ? Palette::ink : Palette::accent);
+    // son brut : gris léger derrière ; son dans la tonalité : vert, par-dessus
+    g.setColour (source == Source::input ? Palette::ink.withAlpha (0.30f) : Palette::accent.withAlpha (0.85f));
 
     juce::RectangleList<float> bars;
     bars.ensureStorageAllocated (historySize);
