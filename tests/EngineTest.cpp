@@ -21,8 +21,7 @@
 #include "../Source/ProEq.h"
 #include "../Source/PartialSnapper.h"
 #include "../Source/KeyDetector.h"
-#include "../Source/PitchShifter.h"
-#include "../Source/TonalPitchShifter.h"
+#include "../Source/TranceGate.h"
 
 #include <cstdio>
 #include <random>
@@ -616,36 +615,6 @@ int main (int argc, char** argv)
         }
     }
 
-    // ---- 11b. PITCH (elastic) --------------------------------------------------
-    {
-        std::printf ("11b. pitch (elastic)\n");
-        for (float st : { 12.0f, -12.0f, 7.0f, -5.0f, 0.0f })
-        {
-            PitchShifter ps; ps.prepare (sr);
-            const int len = (int) sr * 2;
-            juce::AudioBuffer<float> b (2, len);
-            b.clear(); sine (b, 220.0, 0.4f);
-            const auto ref = b;
-            for (int pos = 0; pos < len; pos += 512)
-            {
-                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, len - pos));
-                ps.process (v, 2, st);
-            }
-            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
-            const double expect = 220.0 * std::exp2 (st / 12.0);
-            const double cents = 1200.0 * std::log2 (hz / expect);
-            const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / ref.getRMSLevel (0, len / 2, len / 2));
-            std::printf ("     %+3.0f st : %.1f Hz (attendu %.1f, %+.1f cents), niveau %+.1f dB\n", st, hz, expect, cents, lvl);
-            if (st == 0.0f)
-            {
-                float diff = 0; for (int n = 0; n < len; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
-                check (diff < 1.0e-6f, "pitch 0 : son strictement inchangé (contourné)");
-            }
-            else
-                check (std::abs (cents) < 5.0 && std::abs (lvl) < 3.0f, "transposition juste, niveau conservé");
-        }
-    }
-
     // ---- 12. EQ façon Pro-Q (coupes + cloches) --------------------------------
     {
         std::printf ("12. eq façon pro-q\n");
@@ -830,75 +799,50 @@ int main (int argc, char** argv)
         check (okSets == total, "scan : la bonne gamme est trouvée (8 tonalités)");
     }
 
-    // ---- 15. PITCH 3.1 : transposition partiel par partiel ---------------------
+    // ---- 15. GATE 3.3 : coupe sur les temps --------------------------------------
     {
-        std::printf ("15. pitch partiel par partiel (0 latence)\n");
-        auto runTP = [&] (juce::AudioBuffer<float>& b, float st)
+        std::printf ("15. gate (16 pas, calé sur le tempo)\n");
+        const double bpm = 120.0, ppqPerSample = bpm / 60.0 / sr;
         {
-            TonalPitchShifter tp; tp.prepare (sr, 512);
-            for (int pos = 0; pos < b.getNumSamples(); pos += 512)
+            TranceGate gt; gt.prepare (sr);
+            bool unity = true;
+            for (int n = 0; n < (int) sr; ++n) unity &= gt.next (n * ppqPerSample, false, 3) >= 1.0f;
+            check (unity, "gate éteint : son strictement inchangé");
+        }
+        {
+            // « pulse » : pas impairs ouverts, pairs fermés.
+            TranceGate gt; gt.prepare (sr);
+            const int len = (int) sr * 4;
+            std::vector<float> g ((size_t) len);
+            for (int n = 0; n < len; ++n) g[(size_t) n] = gt.next (n * ppqPerSample, true, 1);
+            const int stepLen = (int) std::lround (0.25 / ppqPerSample);
+            float openMin = 1.0f, closedMax = 0.0f, jump = 0.0f;
+            for (int s = 8; s < len / stepLen - 1; ++s)
             {
-                juce::AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, pos, juce::jmin (512, b.getNumSamples() - pos));
-                tp.process (v, 2, st);
+                const int mid = s * stepLen + stepLen / 2;
+                if (s % 2 == 0) openMin = juce::jmin (openMin, g[(size_t) mid]);
+                else            closedMax = juce::jmax (closedMax, g[(size_t) mid]);
             }
-        };
-        for (float st : { 12.0f, 7.0f, -5.0f, -12.0f, 3.0f })
-        {
-            const int len = (int) sr * 2;
-            juce::AudioBuffer<float> b (2, len); b.clear(); sine (b, 220.0, 0.4f);
-            const float before = b.getRMSLevel (0, len / 2, len / 2);
-            runTP (b, st);
-            const auto [hz, resid] = dominantFrequency (b.getReadPointer (0) + len / 2, len / 2);
-            const double expect = 220.0 * std::exp2 (st / 12.0);
-            const double cents = 1200.0 * std::log2 (hz / expect);
-            const float lvl = juce::Decibels::gainToDecibels (b.getRMSLevel (0, len / 2, len / 2) / before);
-            std::printf ("     %+3.0f st : %.2f Hz (attendu %.2f, %+.2f cents), niveau %+.2f dB, résidu %.0f dB\n", st, hz, expect, cents, lvl, resid);
-            check (std::abs (cents) < 2.0 && std::abs (lvl) < 1.0f && resid < -30.0, "transposition juste et propre");
+            for (int n = (int) sr; n < len - 1; ++n) jump = juce::jmax (jump, std::abs (g[(size_t) n + 1] - g[(size_t) n]));
+            std::printf ("     pulse : ouvert %.3f, fermé %.1f dB, saut max %.3f / éch.\n", openMin, juce::Decibels::gainToDecibels (closedMax, -120.0f), jump);
+            check (openMin > 0.99f && closedMax < 0.01f, "pas ouverts / fermés au bon moment");
+            check (jump < 0.05f, "pas de clic (ouverture ~1 ms, fermeture ~4 ms)");
+            // 0 latence : la porte s'ouvre dès le début du pas (à 1 ms près).
+            const int s0 = 16 * stepLen;
+            check (g[(size_t) (s0 - 2)] < 0.05f && g[(size_t) (s0 + (int) (0.003 * sr))] > 0.9f, "ouverture calée sur le temps");
         }
         {
-            const int len = (int) sr;
-            juce::AudioBuffer<float> b (2, len);
-            std::mt19937 rng (2); std::normal_distribution<float> nd (0.0f, 0.1f);
-            for (int c = 0; c < 2; ++c) for (int n = 0; n < len; ++n) b.setSample (c, n, nd (rng));
-            const auto ref = b;
-            runTP (b, 0.0f);
-            float diff = 0; for (int n = 0; n < len; ++n) diff = juce::jmax (diff, std::abs (b.getSample (0, n) - ref.getSample (0, n)));
-            check (diff < 1.0e-7f, "pitch 0 : son strictement inchangé");
-        }
-        {
-            // attaques : un clic ressort une seule fois (pas de doublement) ; vers le
-            // bas à l'heure, vers le haut avec au plus (rapport − 1) × 12 ms.
-            for (float st : { -5.0f, 7.0f, 12.0f })
+            bool ok = true;
+            for (int p = 0; p < TranceGate::numPresets; ++p)
             {
-                juce::AudioBuffer<float> b (2, (int) sr); b.clear();
-                for (int k = 0; k < 4; ++k) for (int n = 0; n < 40; ++n) { const float v = 0.9f * std::exp (-n / 8.0f) * (n % 2 ? -1.0f : 1.0f); b.setSample (0, 4000 + k * 9000 + n, v); b.setSample (1, 4000 + k * 9000 + n, v); }
-                runTP (b, st);
-                const double maxDelay = juce::jmax (0.0, std::exp2 (st / 12.0) - 1.0) * 0.012 * sr + 0.001 * sr;
-                int worst = 0; float echo = 0.0f;
-                for (int k = 0; k < 4; ++k)
+                TranceGate gt; gt.prepare (sr);
+                for (int n = 0; n < (int) sr * 2; ++n)
                 {
-                    const int at = 4000 + k * 9000;
-                    int p = at; for (int n = at - 50; n < at + 2000; ++n) if (std::abs (b.getSample (0, n)) > std::abs (b.getSample (0, p))) p = n;
-                    worst = juce::jmax (worst, p - at);
-                    for (int n = p + (int) (0.002 * sr); n < at + 2000; ++n) echo = juce::jmax (echo, std::abs (b.getSample (0, n)) / std::abs (b.getSample (0, p)));
+                    const float v = gt.next (n * ppqPerSample + 0.1, (n / 9000) % 3 != 0, (p + n / 20000) % TranceGate::numPresets);
+                    ok &= std::isfinite (v) && v >= 0.0f && v <= 1.0001f;
                 }
-                std::printf ("     clics %+3.0f st : décalage %d éch. (max permis %d), écho %.0f dB\n", st, worst, (int) maxDelay, juce::Decibels::gainToDecibels (echo));
-                check (worst <= (int) maxDelay && worst >= -2 && echo < 0.3f, "attaques nettes, une seule fois");
             }
-        }
-        {
-            TonalPitchShifter tp; tp.prepare (sr, 128);
-            juce::AudioBuffer<float> b (2, 128);
-            std::mt19937 rng (8); std::uniform_real_distribution<float> u (-1.0f, 1.0f);
-            bool finite = true; float peak = 0;
-            for (int blk = 0; blk < (int) (6 * sr / 128); ++blk)
-            {
-                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) b.setSample (c, n, (blk % 30 < 15 ? 0.9f : 0.02f) * u (rng));
-                tp.process (b, 2, (float) ((blk / 20) % 25 - 12));
-                for (int c = 0; c < 2; ++c) for (int n = 0; n < 128; ++n) { finite &= std::isfinite (b.getSample (c, n)); peak = juce::jmax (peak, std::abs (b.getSample (c, n))); }
-            }
-            std::printf ("     automation brutale : crête %.2f\n", peak);
-            check (finite && peak < 4.0f, "pitch stable sous automation brutale");
+            check (ok, "15 motifs stables (bascule et changement de motif en cours de lecture)");
         }
     }
 

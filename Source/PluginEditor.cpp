@@ -14,6 +14,7 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
       eqView     (p.apvts),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
+      gatePanel  (*p.apvts.getParameter (ParamIDs::gateOn), *p.apvts.getParameter (ParamIDs::gatePreset)),
       scanPage   (p),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
 {
@@ -26,8 +27,7 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     setupKnob (reverbKnob, "reverb",  30.0, reverbArea, reverbAttachment, ParamIDs::reverb);
     setupKnob (gainKnob,   "gain",     0.0, gainArea,   gainAttachment,   ParamIDs::gain);
     gainKnob.setMouseDragSensitivity (300);
-    setupKnob (pitchKnob,  "pitch",    0.0, pitchArea,  pitchAttachment,  ParamIDs::pitch);
-    pitchKnob.setMouseDragSensitivity (300);
+    addAndMakeVisible (gatePanel);
 
     addAndMakeVisible (modeToggle);
     addAndMakeVisible (noteRow);
@@ -67,7 +67,7 @@ void FrameCanvas::resized()
     eqView.setBounds       (spectrumArea.toNearestInt());
     partialBand.setBounds  (partialArea.toNearestInt());
     harmoKnob.setBounds  (knobArea);
-    pitchKnob.setBounds  (pitchArea);
+    gatePanel.setBounds  (gateArea);
     reverbKnob.setBounds (reverbArea);
     gainKnob.setBounds   (gainArea);
     modeToggle.setBounds (modeArea);
@@ -100,6 +100,8 @@ void FrameCanvas::refresh()
     }
 
     // 3. Gamme courante (surlignage du spectrogramme, points sous les notes)
+    gatePanel.setStep (processor.getGateStep());
+
     const uint16_t mask = processor.getCurrentScaleMask();
     eqView.setScale (mask, noteRow.getNote());
     noteRow.setScaleMask (mask);
@@ -168,10 +170,9 @@ void FrameCanvas::paint (juce::Graphics& g)
 
     const auto knobC = knobArea.toFloat().getCentre();
     const auto reverbC = reverbArea.toFloat().getCentre();
-    const auto pitchC = pitchArea.toFloat().getCentre();
     drawCallout (g, "harmo",  { left, 616.0f },   { knobC.x,   (float) knobArea.getY() + 2.0f }, true);
     drawCallout (g, "reverb", { 210.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
-    drawCallout (g, "pitch",  { 340.0f, 616.0f }, { pitchC.x,  (float) pitchArea.getY() + 2.0f }, true);
+    drawCallout (g, "gate",   { 350.0f, 616.0f }, { (float) gateArea.getCentreX(), (float) gateArea.getY() - 2.0f }, true);
     drawCallout (g, "mode",   { 488.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
     drawCallout (g, "tonic",  { 672.0f, 616.0f },
                  { (float) noteArea.getX() + noteArea.getWidth() * ((float) noteRow.getNote() + 0.5f) / 12.0f,
@@ -184,8 +185,6 @@ void FrameCanvas::paint (juce::Graphics& g)
     };
     value (juce::String (juce::roundToInt (harmoKnob.getValue())) + " %", knobC, knobArea);
     value (juce::String (juce::roundToInt (reverbKnob.getValue())) + " %", reverbC, reverbArea);
-    const int st = juce::roundToInt (pitchKnob.getValue());
-    value ((st > 0 ? "+" : "") + juce::String (st) + " st", pitchC, pitchArea);
 }
 
 void FrameCanvas::drawTimeAxis (juce::Graphics& g, juce::Rectangle<float> span)

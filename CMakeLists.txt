@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-project(FRAME VERSION 3.2.1 LANGUAGES C CXX)
+project(FRAME VERSION 3.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,9 +73,7 @@ target_sources(Frame PRIVATE
     Source/ZeroLatencyHarmonizer.cpp
     Source/PartialSnapper.cpp
     Source/KeyDetector.cpp
-    Source/PitchShifter.cpp
-    Source/TonalPitchShifter.cpp
-    Source/GrainShifter.cpp
+    Source/TranceGate.cpp
     Source/ProEq.cpp
     Source/FrameLookAndFeel.cpp
     Source/Visualisers.cpp
@@ -107,7 +105,7 @@ target_link_libraries(Frame
 # ------------------------------------------------------------------------------
 if(FRAME_BUILD_TESTS)
     juce_add_console_app(FrameEngineTest PRODUCT_NAME "frame_engine_test")
-    target_sources(FrameEngineTest PRIVATE tests/EngineTest.cpp Source/SpectralEngine.cpp Source/AmbientReverb.cpp Source/ZeroLatencyHarmonizer.cpp Source/PartialSnapper.cpp Source/KeyDetector.cpp Source/ProEq.cpp Source/PitchShifter.cpp Source/TonalPitchShifter.cpp Source/GrainShifter.cpp)
+    target_sources(FrameEngineTest PRIVATE tests/EngineTest.cpp Source/SpectralEngine.cpp Source/AmbientReverb.cpp Source/ZeroLatencyHarmonizer.cpp Source/PartialSnapper.cpp Source/KeyDetector.cpp Source/ProEq.cpp Source/TranceGate.cpp)
     target_compile_definitions(FrameEngineTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(FrameEngineTest PRIVATE
         juce::juce_dsp juce::juce_audio_formats
@@ -116,7 +114,7 @@ if(FRAME_BUILD_TESTS)
     # Capture PNG de l'interface (utilise le code partagé du plugin)
     juce_add_console_app(FrameUiSnapshot PRODUCT_NAME "frame_ui_snapshot")
     target_sources(FrameUiSnapshot PRIVATE tests/UiSnapshot.cpp
-        Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/ScanPage.cpp Source/SpectralEngine.cpp Source/AmbientReverb.cpp Source/ZeroLatencyHarmonizer.cpp Source/PartialSnapper.cpp Source/KeyDetector.cpp Source/ProEq.cpp Source/PitchShifter.cpp Source/TonalPitchShifter.cpp Source/GrainShifter.cpp
+        Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/ScanPage.cpp Source/SpectralEngine.cpp Source/AmbientReverb.cpp Source/ZeroLatencyHarmonizer.cpp Source/PartialSnapper.cpp Source/KeyDetector.cpp Source/ProEq.cpp Source/TranceGate.cpp
         Source/FrameLookAndFeel.cpp Source/Visualisers.cpp Source/Controls.cpp)
     target_compile_definitions(FrameUiSnapshot PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(FrameUiSnapshot PRIVATE FrameBinaryData

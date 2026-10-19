@@ -16,7 +16,8 @@ FrameAudioProcessor::FrameAudioProcessor()
       apvts (*this, nullptr, "FRAME_STATE", createParameterLayout())
 {
     harmoParam = apvts.getRawParameterValue (ParamIDs::harmo);
-    pitchParam = apvts.getRawParameterValue (ParamIDs::pitch);
+    gateOnParam = apvts.getRawParameterValue (ParamIDs::gateOn);
+    gatePresetParam = apvts.getRawParameterValue (ParamIDs::gatePreset);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
@@ -37,7 +38,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     AudioProcessorValueTreeState::ParameterLayout layout;
 
     // 1. HARMO (ancien MIX) : 0–100 %, défaut 100 %. Dose uniquement le
-    //    traitement harmonique (peigne + harmoniques) : à 0 %, reverb, pitch,
+    //    traitement harmonique (peigne + harmoniques) : à 0 %, reverb, gate,
     //    EQ et gain continuent de fonctionner.
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ParamIDs::harmo, 1 }, "harmo",
@@ -66,14 +67,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
             .withStringFromValueFunction ([] (float v, int) { return (v > 0.05f ? "+" : "") + String (v, 1) + " dB"; })
             .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789.").getFloatValue(); })));
 
-    // 3b. PITCH : −12 … +12 demi-tons (elastic), défaut 0.
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ParamIDs::pitch, 1 }, "pitch",
-        NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
-        AudioParameterFloatAttributes()
-            .withLabel ("st")
-            .withStringFromValueFunction ([] (float v, int) { const int st = roundToInt (v); return (st > 0 ? "+" : "") + String (st) + " st"; })
-            .withValueFromStringFunction ([] (const String& s) { return s.retainCharacters ("-0123456789").getFloatValue(); })));
+    // 4. GATE : coupe le son sur les temps (16 pas), éteint par défaut, 15 motifs.
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { ParamIDs::gateOn, 1 }, "gate", false));
+    {
+        StringArray names;
+        for (int i = 0; i < TranceGate::numPresets; ++i)
+            names.add (TranceGate::preset (i).name);
+        layout.add (std::make_unique<AudioParameterChoice> (
+            ParameterID { ParamIDs::gatePreset, 1 }, "gate preset", names, 0));
+    }
 
     // 5. MODE : major / minor.
     layout.add (std::make_unique<AudioParameterChoice> (
@@ -154,7 +157,8 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     harmoSmoothed.reset (sampleRate, 0.05);            // 50 ms de lissage : pas de clic
     harmoSmoothed.setCurrentAndTargetValue (harmoParam->load() * 0.01f);
     preHarmoBuffer.setSize (2, maxChunk, false, true, false);
-    pitcher.prepare (sampleRate, maxChunk);
+    gate.prepare (sampleRate);
+    freePpq = 0.0;
     keyDetector.prepare (sampleRate);                  // SCAN : analyse de l'entrée (seulement pendant un scan)
     holdIn  = 1.0f - std::exp (-1.0f / (0.03f * (float) sampleRate));   // vers le son d'origine : 30 ms
     holdOut = 1.0f - std::exp (-1.0f / (0.15f * (float) sampleRate));   // retour de l'effet : 150 ms
@@ -245,7 +249,7 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         engine.reset();
         harmonizer.reset();
         snapper.reset();
-        pitcher.reset();
+        gate.reset();
         proEq.reset();
         reverb.reset();
         guardDry = guardWet = 0.0f;
@@ -275,6 +279,24 @@ void FrameAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (! std::isfinite (reverbSmoothed)) reverbSmoothed = reverbTarget;
 
 
+    // GATE : position et tempo du DAW. Transport arrêté (ou pas d'info) : le
+    // gate tourne seul, au tempo du DAW (120 par défaut).
+    {
+        double bpm = 120.0, ppq = freePpq;
+        bool playing = false;
+        if (auto* ph = getPlayHead())
+            if (auto pos = ph->getPosition())
+            {
+                if (auto b = pos->getBpm()) if (*b > 1.0 && *b < 1000.0) bpm = *b;
+                playing = pos->getIsPlaying();
+                if (playing)
+                    if (auto q = pos->getPpqPosition()) ppq = *q;
+            }
+        ppqPerSample = bpm / 60.0 / (sr > 0.0 ? sr : 44100.0);
+        blockPpq = std::isfinite (ppq) ? ppq : 0.0;
+        freePpq = playing ? 0.0 : std::fmod (blockPpq + ppqPerSample * buffer.getNumSamples(), 4096.0);
+    }
+
     // L'hôte peut envoyer un bloc plus grand qu'annoncé : on découpe.
     for (int start = 0; start < buffer.getNumSamples(); start += maxChunk)
         processChunk (buffer, start, juce::jmin (maxChunk, buffer.getNumSamples() - start));
@@ -298,8 +320,6 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     // Vue sur la partie utile de wetBuffer (pas d'allocation pour ≤ 32 canaux).
     juce::AudioBuffer<float> wetView (wetBuffer.getArrayOfWritePointers(), numChannels, 0, numSamples);
     reverb.process (wetView, numChannels, reverbSmoothed);   // 1. reverb ambient + particules (0 latence)
-    pitcher.process (wetView, numChannels,                   // 2. PITCH (partiel par partiel), contourné à 0 ;
-                     juce::jlimit (-12.0f, 12.0f, finiteOrZero (pitchParam->load())));   //    avant l'harmonie : reste dans la gamme
     for (int c = 0; c < numChannels; ++c)                    // (copie pour le dosage HARMO)
         preHarmoBuffer.copyFrom (c, 0, wetBuffer, c, 0, numSamples);
     snapper.process (wetView, numChannels, 1.0f);            // 3a. partiels tenus recalés sur la gamme
@@ -374,7 +394,10 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     //     une coupure voulue.
     proEq.process (outBuffer.getArrayOfWritePointers(), numChannels, numSamples, getEqSettings());
 
-    // 5c. Limiteur de sortie, vu-mètres, tranches de forme d'onde.
+    const bool gateOnNow = gateOnParam->load() > 0.5f;
+    const int gatePresetNow = juce::jlimit (0, TranceGate::numPresets - 1, (int) std::lround (finiteOrZero (gatePresetParam->load())));
+
+    // 5c. Limiteur de sortie, GATE, vu-mètres, tranches de forme d'onde.
     for (int i = 0; i < numSamples; ++i)
     {
         float inLo = 0.0f, inHi = 0.0f, outLo = 0.0f, outHi = 0.0f;
@@ -395,6 +418,9 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
         if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
 
+        // GATE : coupe sur les temps (sur le son traité ; 0 latence).
+        const float gg = gate.next (blockPpq + ppqPerSample * (double) (startSample + i), gateOnNow, gatePresetNow);
+
         // SCAN : pendant l'écoute, et tant qu'aucun scan n'est terminé, on
         // n'entend que le son d'origine (brut).
         const float holdTarget = (scanHold.load (std::memory_order_relaxed)
@@ -405,7 +431,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
 
         for (int c = 0; c < numChannels; ++c)
         {
-            float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid);
+            float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid) * gg;
             if (holdSmoothed >= 1.0f)
                 y = dryBuffer.getSample (c, i);                     // son d'origine, à l'identique
             else if (holdSmoothed > 0.0f)
@@ -437,6 +463,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     inputLevelDb.store  (juce::Decibels::gainToDecibels (0.5f * meterIn,  -100.0f));
     outputLevelDb.store (juce::Decibels::gainToDecibels (0.5f * meterOut, -100.0f));
     restoreActive.store (directRestore > 0.05f);
+    gateStep.store (gateOnNow ? gate.getStep() : -1);
 }
 
 void FrameAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)

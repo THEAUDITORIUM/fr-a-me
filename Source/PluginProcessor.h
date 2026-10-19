@@ -12,7 +12,7 @@
 #include "SpectralEngine.h"
 #include "AmbientReverb.h"
 #include "ZeroLatencyHarmonizer.h"
-#include "TonalPitchShifter.h"
+#include "TranceGate.h"
 #include "PartialSnapper.h"
 #include "KeyDetector.h"
 #include "ProEq.h"
@@ -28,7 +28,8 @@ struct WaveSlice
 namespace ParamIDs
 {
     inline constexpr const char* harmo = "harmo";   // ancien « mix »
-    inline constexpr const char* pitch = "pitch";
+    inline constexpr const char* gateOn = "gateOn";        // GATE : marche / arrêt (arrêt au lancement)
+    inline constexpr const char* gatePreset = "gatePreset"; // GATE : motif (15)
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* gain   = "gain";
     inline constexpr const char* mode = "mode";
@@ -96,6 +97,8 @@ public:
     /** Applique la tonalité trouvée puis rend l'effet (fondu). */
     void applyDetectedKey (int tonic, int mode);
     bool isScanHolding() const noexcept { return scanHold.load(); }
+    /** GATE : pas joué (0 … 15), −1 si éteint. */
+    int getGateStep() const noexcept { return gateStep.load(); }
     /** 3.2 : l'effet ne s'active qu'une fois une tonalité trouvée par un scan
         terminé. Avant : la sortie est le son d'origine, tel quel (0 latence).
         Sauvegardé avec le projet. */
@@ -133,7 +136,11 @@ private:
     float holdSmoothed = 0.0f, holdIn = 0.01f, holdOut = 0.001f;
     PartialSnapper snapper;               // recalage des partiels tenus sur la gamme (0 latence)
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
-    TonalPitchShifter pitcher;            // PITCH −12…+12 : partiel par partiel, AVANT l'harmonie (le son transposé reste dans la gamme)
+    TranceGate gate;                      // GATE : coupe le son sur les temps (16 pas, calé sur le DAW)
+    std::atomic<float>* gateOnParam = nullptr;
+    std::atomic<float>* gatePresetParam = nullptr;
+    double blockPpq = 0.0, ppqPerSample = 0.0, freePpq = 0.0;   // position du DAW pour le bloc en cours
+    std::atomic<int> gateStep { -1 };     // pas joué (interface), −1 si gate éteint
     ProEq proEq;                          // EQ façon Pro-Q (partie spectrum), juste avant le limiteur
     std::atomic<float>* eqLowParam = nullptr;
     std::atomic<float>* eqHighParam = nullptr;
@@ -143,7 +150,6 @@ private:
     juce::AudioBuffer<float> outBuffer;   // sortie avant EQ + limiteur
 
     std::atomic<float>* harmoParam = nullptr;
-    std::atomic<float>* pitchParam = nullptr;
     std::atomic<float>* reverbParam = nullptr;
     std::atomic<float>* gainParam = nullptr;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGain;

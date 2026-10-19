@@ -5,6 +5,7 @@
 */
 
 #include "Controls.h"
+#include "TranceGate.h"
 #include "FrameLookAndFeel.h"
 #include "Scale.h"
 #include "ProEq.h"
@@ -66,6 +67,144 @@ void ModeToggle::mouseUp (const juce::MouseEvent& e)
     else if (optionBounds (1).contains (e.position)) target = 1;
 
     attachment->setValueAsCompleteGesture ((float) target);
+}
+
+//==============================================================================
+//  GatePanel
+//==============================================================================
+GatePanel::GatePanel (juce::RangedAudioParameter& onParam, juce::RangedAudioParameter& presetParam)
+{
+    setTitle ("gate");
+    onAttachment = std::make_unique<juce::ParameterAttachment> (onParam, [this] (float v)
+    {
+        on = v > 0.5f;
+        repaint();
+    });
+    presetAttachment = std::make_unique<juce::ParameterAttachment> (presetParam, [this] (float v)
+    {
+        preset = juce::jlimit (0, TranceGate::numPresets - 1, juce::roundToInt (v));
+        repaint();
+    });
+    onAttachment->sendInitialUpdate();
+    presetAttachment->sendInitialUpdate();
+}
+
+juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 24.0f, 22.0f }; }
+juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float) getWidth() - 24.0f, 0.0f, 24.0f, 22.0f }; }
+juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 29.0f, (float) getWidth(), 38.0f }; }
+juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
+{
+    const float w = 46.0f, slash = 18.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
+    return { x0 + (float) index * (w + slash), 76.0f, w, 22.0f };
+}
+
+void GatePanel::setStep (int s)
+{
+    if (s != step) { step = s; repaint (stepsArea().expanded (2.0f, 6.0f).toNearestInt()); }
+}
+
+void GatePanel::paint (juce::Graphics& g)
+{
+    using J = juce::Justification;
+    const auto& p = TranceGate::preset (preset);
+
+    // ‹ nom ›
+    auto arrow = [&] (juce::Rectangle<float> r, bool left, bool hot)
+    {
+        const auto c = r.getCentre();
+        juce::Path a;
+        a.startNewSubPath (c.x + (left ? 3.0f : -3.0f), c.y - 6.0f);
+        a.lineTo (c.x + (left ? -3.0f : 3.0f), c.y);
+        a.lineTo (c.x + (left ? 3.0f : -3.0f), c.y + 6.0f);
+        if (hot) { g.setColour (Palette::accent.withAlpha (0.45f)); g.fillEllipse (r.withSizeKeepingCentre (20.0f, 20.0f)); }
+        g.setColour (Palette::ink);
+        g.strokePath (a, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    };
+    arrow (leftArrow(), true, hover == 0);
+    arrow (rightArrow(), false, hover == 1);
+    drawMonoText (g, p.name, { 24.0f, 0.0f, (float) getWidth() - 48.0f, 22.0f }, 13.0f, J::centred, Palette::ink, true, 0.06f);
+
+    // 16 pas : fente fine, barre verte à la hauteur du niveau.
+    const auto sa = stepsArea();
+    const float cw = sa.getWidth() / (float) TranceGate::numSteps;
+    for (int i = 0; i < TranceGate::numSteps; ++i)
+    {
+        const auto slot = juce::Rectangle<float> (sa.getX() + (float) i * cw + 1.0f, sa.getY(), cw - 2.0f, sa.getHeight());
+        const float lvl = p.steps[(size_t) i];
+        const bool current = on && i == step;
+        g.setColour (Palette::faint);
+        g.drawRoundedRectangle (slot, 1.5f, 0.6f);
+        if (lvl > 0.0f)
+        {
+            const auto bar = slot.withTop (slot.getBottom() - lvl * slot.getHeight());
+            g.setColour (current ? Palette::accentInk : (on ? Palette::accent : Palette::accent.withAlpha (0.4f)));
+            g.fillRoundedRectangle (bar, 1.5f);
+        }
+        else
+        {
+            g.setColour (Palette::pencil);
+            g.fillRect (slot.getX() + 1.0f, slot.getBottom() - 1.5f, slot.getWidth() - 2.0f, 1.0f);
+        }
+        // temps forts (1, 5, 9, 13) : petit point dessous ; pas joué : point vert plus gros
+        if (current)
+        {
+            g.setColour (Palette::accentInk);
+            g.fillEllipse (slot.getCentreX() - 2.0f, sa.getBottom() + 3.0f, 4.0f, 4.0f);
+        }
+        else if (i % 4 == 0)
+        {
+            g.setColour (Palette::pencil);
+            g.fillEllipse (slot.getCentreX() - 1.0f, sa.getBottom() + 4.0f, 2.0f, 2.0f);
+        }
+    }
+
+    // off / on (même écriture que major / minor)
+    const char* labels[2] = { "off", "on" };
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto r = toggleOption (i);
+        const bool active = (i == 1) == on;
+        if (active)
+        {
+            g.setColour (Palette::accent);
+            g.fillRect (r.reduced (2.0f, r.getHeight() * 0.16f));
+        }
+        else if (hover == 2 + i)
+        {
+            g.setColour (Palette::accent.withAlpha (0.25f));
+            g.fillRect (r.reduced (2.0f, r.getHeight() * 0.16f));
+        }
+        drawMonoText (g, labels[i], r, 13.0f, J::centred, active ? Palette::onAccent : Palette::pencil, active);
+    }
+    const auto t0 = toggleOption (0), t1 = toggleOption (1);
+    drawMonoText (g, "/", { t0.getRight(), t0.getY(), t1.getX() - t0.getRight(), t0.getHeight() }, 13.0f, J::centred, Palette::pencil);
+}
+
+void GatePanel::mouseMove (const juce::MouseEvent& e)
+{
+    int h = -1;
+    if (leftArrow().contains (e.position)) h = 0;
+    else if (rightArrow().contains (e.position)) h = 1;
+    else if (toggleOption (0).contains (e.position)) h = 2;
+    else if (toggleOption (1).contains (e.position)) h = 3;
+    setMouseCursor (h >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    if (h != hover) { hover = h; repaint(); }
+}
+
+void GatePanel::mouseUp (const juce::MouseEvent& e)
+{
+    const auto pos = e.position;
+    const int n = TranceGate::numPresets;
+    if (leftArrow().contains (pos))
+        presetAttachment->setValueAsCompleteGesture ((float) ((preset + n - 1) % n));
+    else if (rightArrow().contains (pos))
+        presetAttachment->setValueAsCompleteGesture ((float) ((preset + 1) % n));
+    else if (toggleOption (0).contains (pos))
+        onAttachment->setValueAsCompleteGesture (0.0f);
+    else if (toggleOption (1).contains (pos))
+        onAttachment->setValueAsCompleteGesture (1.0f);
+    else if (stepsArea().contains (pos))
+        onAttachment->setValueAsCompleteGesture (on ? 0.0f : 1.0f);   // clic sur le motif : bascule
 }
 
 //==============================================================================

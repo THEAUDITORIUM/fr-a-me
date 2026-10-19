@@ -6,8 +6,8 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 
 Contrôles : **scan** (page d'accueil : on joue la mélodie, fr(a)me trouve la tonalité et
 règle tonique + mode), **harmo** (0–100 %, recalage des notes tenues + peigne + harmoniques),
-**reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **pitch** (−12 … +12
-demi-tons, elastic), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
+**reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gate** (trance gate
+16 pas calé sur le tempo du DAW, 15 motifs, éteint au lancement), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
 dans la partie spectrum (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
 (−24 … +12 dB, petit bouton en haut à droite, à côté de **scan key**). Thème unique : garden.
 Tous automatisables et sauvegardés avec le projet.
@@ -144,9 +144,9 @@ Résultats obtenus pendant le développement (48 kHz) :
 | bruit blanc → résonances, la mineur | la / do / mi ≥ −1.3 dB, hors gamme ≤ −18.5 dB, 81 % de l'énergie sur les notes, niveau conservé |
 | bruit blanc → résonances, mi majeur | mi / sol# / si ≥ −4.1 dB, hors gamme ≤ −19.3 dB, 80 % sur les notes |
 | vos hi-hats, chaîne complète | 90–92 % de l'énergie sur les notes de la gamme, hors gamme −25 à −41 dB, niveau identique |
-| PITCH +12 / −12 / +7 / −5 | 440.0 / 110.0 / 329.7 / 164.8 Hz depuis 220 Hz (±0.2 cent) ; 0 = inchangé |
-| HARMO à 0 | reverb, pitch et EQ actifs ; tout à 0 → son d'origine (corrélation 0.999) |
-| automation brutale HARMO / REVERB / PITCH / EQ / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
+| GATE | éteint = son strictement inchangé ; « pulse » : pas ouverts à 1.000, fermés à −91 dB, ouverture calée sur le temps (< 1 ms), aucun clic |
+| HARMO à 0 | reverb, gate et EQ actifs ; tout à 0 → son d'origine (corrélation 0.999) |
+| automation brutale HARMO / REVERB / GATE / EQ / GAIN / gamme | aucune valeur invalide (aussi sous AddressSanitizer, 44.1–96 kHz, blocs de 0 à 3072) |
 | taille de bloc variable | sortie identique à l'échantillon près |
 
 Une cible `FrameUiSnapshot` (même option) produit une capture PNG de l'interface.
@@ -163,9 +163,7 @@ frame/
 │   ├── SpectralEngine.*      moteur spectral : STFT, vocodeur de phase, recalage, harmoniques, peigne, OLA
 │   ├── AmbientReverb.*       réverbe ambient (FDN) + nuage granulaire réinjecté
 │   ├── ProEq.*               EQ façon Pro-Q : coupes 24 dB/oct + 3 cloches (0 latence)
-│   ├── TonalPitchShifter.*   PITCH : transposition partiel par partiel (0 latence)
-│   ├── GrainShifter.*        PITCH : grains courts pour les attaques et les bruits
-│   ├── PitchShifter.*        ancien décaleur à têtes (gardé pour les tests)
+│   ├── TranceGate.*          GATE : 16 pas calés sur le DAW, 15 motifs (0 latence)
 │   ├── PartialSnapper.*      recalage des partiels tenus sur la gamme (0 latence)
 │   ├── ZeroLatencyHarmonizer.* peigne harmonique + harmoniques justes (0 latence)
 │   ├── KeyDetector.*         SCAN : détection de la tonalité de l'entrée
@@ -316,25 +314,20 @@ correspond au son (cloche +12 dB mesurée à +12.0 dB).
 
 **HARMO** (ancien MIX, 0–100 %) : dose uniquement le traitement harmonique (peigne +
 harmoniques justes) ; à 100 % le son est celui de la 2.0.0. À 0 %, la réverbe, l'EQ,
-le pitch et le gain fonctionnent toujours : chaque bouton agit seul, et ensemble ils
-s'enchaînent dans cet ordre — reverb → pitch → harmo → gain → EQ — pour que tout ce qui
+le gate et le gain fonctionnent toujours : chaque bouton agit seul, et ensemble ils
+s'enchaînent dans cet ordre — reverb → harmo → gain → EQ → gate — pour que tout ce qui
 est ajouté (queue, porteuses) passe dans la gamme.
 
-**PITCH 3.1** (−12 … +12 demi-tons, 0 par défaut), refait entièrement, sans latence :
-- placé **avant l'harmonie** : le son transposé est ensuite recalé dans la gamme choisie
-  (en 3.0 le pitch était en fin de chaîne et sortait tout de la tonalité — à +3 demi-tons,
-  28 % seulement des partiels restaient dans la gamme ; en 3.1 : 86 à 97 %) ;
-- **partiel par partiel** (`TonalPitchShifter`) : ~80 bandes analytiques (4 pôles complexes,
-  un demi-ton chacune, plus larges dans le grave) mesurent la fréquence réelle de chaque
-  partiel tonal, qui est retiré du son et remis exactement à ratio × sa fréquence (rotation
-  de phase continue : pas de grains, pas de flottement, harmoniques conservées). Mesuré :
-  ±0.2 cent à ±12, +7, −5, +3, niveau ±0.01 dB, résidu −48 à −70 dB ;
-- le **reste** (attaques, souffle, bruits) passe par des grains de 12 ms redémarrés à chaque
-  attaque (`GrainShifter`) : chaque attaque sort une seule fois (écho −25 à −42 dB), à
-  l'heure vers le bas, avec au plus (rapport − 1) × 12 ms vers le haut (3 ms à +3, 6 ms à
-  +7) — l'ancien pitch décalait les attaques d'environ 28 ms ;
-- quand le son est surtout tonal, ce reste est atténué pour ne pas battre avec les partiels.
-À 0, contourné : son strictement inchangé.
+**GATE 3.3** (à la place du pitch, retiré) : trance gate qui coupe le son sur les temps.
+- 16 pas par mesure (doubles croches), calés sur la position et le tempo du DAW ;
+  transport arrêté : il tourne seul au tempo du DAW (120 par défaut) ;
+- **éteint au lancement** ; « off / on » (ou un clic sur le motif) pour l'allumer quand on
+  veut ; ‹ › pour changer de motif : bloom, pulse, flutter, gallop, offbeat, pump, chop,
+  morse, dotted, tresillo, heart, ripple, swell, sparkle, drift ;
+- chaque pas a son niveau (certains motifs ont des pas à moitié ouverts ou en rampe) et
+  une longueur d'ouverture propre au motif ; ouverture ~1 ms, fermeture ~4 ms : net, sans
+  clic ; allumer, éteindre ou changer de motif se fait en fondu (20 ms) ;
+- appliqué au son traité, en fin de chaîne, à 0 latence (un simple gain).
 
 **Thème** : un seul, garden — fond blanc, encre de mousse, vert d'herbe, quelques touches de
 rose ; trois aplats d'herbe couchée dans les marges et un brin au crayon.
@@ -397,8 +390,8 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   sortie, avec la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   vert si le pic a été recalé ;
-- en bas, trois gros boutons : **harmo** (double-clic = 100 %), **reverb** (double-clic =
-  30 %), **pitch** (double-clic = 0) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
+- en bas : **harmo** (double-clic = 100 %), **reverb** (double-clic = 30 %), le **gate**
+  (‹ nom du motif ›, les 16 pas avec le pas joué en vert foncé, off / on) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
 

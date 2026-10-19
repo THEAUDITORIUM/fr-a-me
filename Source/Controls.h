@@ -35,6 +35,32 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
+/** GATE (3.3) : motif de 16 pas (barres façon planche), nom du motif entre
+    deux flèches ‹ ›, et « off / on » dessous (éteint au lancement). */
+class GatePanel final : public juce::Component
+{
+public:
+    GatePanel (juce::RangedAudioParameter& onParam, juce::RangedAudioParameter& presetParam);
+
+    /** Pas joué (0 … 15), −1 si éteint : appelé ~30 fois par seconde. */
+    void setStep (int s);
+
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+
+private:
+    juce::Rectangle<float> leftArrow() const noexcept;
+    juce::Rectangle<float> rightArrow() const noexcept;
+    juce::Rectangle<float> stepsArea() const noexcept;
+    juce::Rectangle<float> toggleOption (int index) const noexcept;   // 0 = off, 1 = on
+
+    bool on = false;
+    int preset = 0, step = -1, hover = -1;
+    std::unique_ptr<juce::ParameterAttachment> onAttachment, presetAttachment;
+};
+
 class NoteRow final : public juce::Component
 {
 public:

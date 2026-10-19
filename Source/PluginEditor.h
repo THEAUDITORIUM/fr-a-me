@@ -43,13 +43,14 @@ private:
     EqView eqView;                        // partie spectrum : EQ façon Pro-Q + analyseur
     PartialScore partialBand;
 
-    juce::Slider harmoKnob, reverbKnob, gainKnob, pitchKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmoAttachment, reverbAttachment, gainAttachment, pitchAttachment;
+    juce::Slider harmoKnob, reverbKnob, gainKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmoAttachment, reverbAttachment, gainAttachment;
 
     void setupKnob (juce::Slider& knob, const juce::String& name, double resetValue,
                     juce::Rectangle<int> area, std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& attachment,
                     const char* paramID);
     ModeToggle modeToggle;
+    GatePanel gatePanel;                  // GATE (à la place de pitch)
     ScanButton scanButton;
     ScanPage scanPage;                    // page d'accueil « scan » (par-dessus la planche)
     NoteRow noteRow;
@@ -65,10 +66,10 @@ private:
     // En haut à droite : scan key, puis le petit bouton gain.
     const juce::Rectangle<int>   scanArea     { 742, 18, 124, 26 };
     const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };
-    // Rangée du bas : trois gros boutons (harmo, reverb, pitch), mode, tonique.
+    // Rangée du bas : deux gros boutons (harmo, reverb), gate, mode, tonique.
     const juce::Rectangle<int>   knobArea     { 110, 630, 92, 92 };
     const juce::Rectangle<int>   reverbArea   { 240, 630, 92, 92 };
-    const juce::Rectangle<int>   pitchArea    { 370, 630, 92, 92 };
+    const juce::Rectangle<int>   gateArea     { 350, 628, 136, 100 };
     const juce::Rectangle<int>   modeArea     { 498, 658, 150, 36 };
     const juce::Rectangle<int>   noteArea     { 672, 651, 248, 50 };
 

@@ -27,7 +27,6 @@ int main (int argc, char** argv)
 
     if (auto* note = proc.apvts.getParameter (ParamIDs::note)) note->setValueNotifyingHost (note->convertTo0to1 (9.0f)); // a
     if (auto* mode = proc.apvts.getParameter (ParamIDs::mode)) mode->setValueNotifyingHost (1.0f);                      // minor
-    if (auto* pt = proc.apvts.getParameter (ParamIDs::pitch)) pt->setValueNotifyingHost (pt->convertTo0to1 (0.0f));
 
     // EQ du spectrum (optionnel) : sortie.png largeur thème low_hz high_hz
     if (argc > 5)
