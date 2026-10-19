@@ -806,7 +806,8 @@ int main (int argc, char** argv)
         {
             TranceGate gt; gt.prepare (sr);
             bool unity = true;
-            for (int n = 0; n < (int) sr; ++n) unity &= gt.next (n * ppqPerSample, false, 3) >= 1.0f;
+            const auto& pr = TranceGate::preset (3);
+            for (int n = 0; n < (int) sr; ++n) unity &= gt.next (n * ppqPerSample, false, pr.steps, pr.length) >= 1.0f;
             check (unity, "gate éteint : son strictement inchangé");
         }
         {
@@ -814,7 +815,8 @@ int main (int argc, char** argv)
             TranceGate gt; gt.prepare (sr);
             const int len = (int) sr * 4;
             std::vector<float> g ((size_t) len);
-            for (int n = 0; n < len; ++n) g[(size_t) n] = gt.next (n * ppqPerSample, true, 1);
+            const auto& pr = TranceGate::preset (1);
+            for (int n = 0; n < len; ++n) g[(size_t) n] = gt.next (n * ppqPerSample, true, pr.steps, pr.length);
             const int stepLen = (int) std::lround (0.25 / ppqPerSample);
             float openMin = 1.0f, closedMax = 0.0f, jump = 0.0f;
             for (int s = 8; s < len / stepLen - 1; ++s)
@@ -838,11 +840,33 @@ int main (int argc, char** argv)
                 TranceGate gt; gt.prepare (sr);
                 for (int n = 0; n < (int) sr * 2; ++n)
                 {
-                    const float v = gt.next (n * ppqPerSample + 0.1, (n / 9000) % 3 != 0, (p + n / 20000) % TranceGate::numPresets);
+                    const auto& pr = TranceGate::preset ((p + n / 20000) % TranceGate::numPresets);
+                    const float v = gt.next (n * ppqPerSample + 0.1, (n / 9000) % 3 != 0, pr.steps, pr.length);
                     ok &= std::isfinite (v) && v >= 0.0f && v <= 1.0001f;
                 }
             }
             check (ok, "15 motifs stables (bascule et changement de motif en cours de lecture)");
+        }
+        {
+            // Pas édités à la main : vélocités au niveau voulu, édition en cours de lecture sans clic.
+            TranceGate gt; gt.prepare (sr);
+            std::array<float, TranceGate::numSteps> st {};
+            for (int i = 0; i < TranceGate::numSteps; ++i) st[(size_t) i] = (float) (i % 4) / 3.0f;
+            const int stepLen = (int) std::lround (0.25 / ppqPerSample);
+            float worst = 0.0f, jump = 0.0f, prev = 1.0f;
+            for (int n = 0; n < stepLen * 64; ++n)
+            {
+                if (n == stepLen * 40 + 123) st[9] = 1.0f - st[9];          // édition pendant la lecture
+                const float v = gt.next (n * ppqPerSample, true, st, 1.0f);
+                const int s = (n / stepLen) % 16;
+                if (n > stepLen * 16 && n < stepLen * 32 && (n % stepLen) == stepLen / 2)
+                    worst = juce::jmax (worst, std::abs (v - st[(size_t) s]));
+                if (n > (int) (0.1 * sr)) jump = juce::jmax (jump, std::abs (v - prev));
+                prev = v;
+            }
+            std::printf ("     pas édités : écart de vélocité max %.3f, saut max %.3f / éch.\n", worst, jump);
+            check (worst < 0.01f, "vélocité de chaque pas respectée");
+            check (jump < 0.05f, "édition en cours de lecture sans clic");
         }
     }
 

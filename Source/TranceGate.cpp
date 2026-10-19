@@ -50,23 +50,13 @@ void TranceGate::reset() noexcept
 {
     env = 1.0f;
     depth = 0.0f;
-    swap = 1.0f;
     step = 0;
 }
 
-float TranceGate::next (double ppq, bool on, int presetIndex) noexcept
+float TranceGate::next (double ppq, bool on, const std::array<float, numSteps>& steps, float length) noexcept
 {
-    presetIndex = std::clamp (presetIndex, 0, numPresets - 1);
     if (! std::isfinite (ppq)) ppq = 0.0;
-
-    // Changement de motif : on rouvre brièvement (fondu), puis le nouveau motif.
-    if (presetIndex != shownPreset)
-    {
-        swap -= depthCoef * 4.0f;
-        if (swap <= 0.0f) { swap = 0.0f; shownPreset = presetIndex; }
-    }
-    else if (swap < 1.0f)
-        swap = std::min (1.0f, swap + depthCoef * 4.0f);
+    length = std::isfinite (length) ? std::clamp (length, 0.05f, 1.0f) : 0.9f;
 
     const double pos = ppq * 4.0;                          // en doubles croches
     const double fl = std::floor (pos);
@@ -75,11 +65,12 @@ float TranceGate::next (double ppq, bool on, int presetIndex) noexcept
     if (idx < 0) idx += numSteps;
     step = (int) idx;
 
-    const auto& p = presets[shownPreset];
-    const float target = phase < (double) p.length ? p.steps[(size_t) idx] : 0.0f;
+    float lvl = steps[(size_t) idx];
+    lvl = std::isfinite (lvl) ? std::clamp (lvl, 0.0f, 1.0f) : 0.0f;
+    const float target = phase < (double) length ? lvl : 0.0f;
     env += (target - env) * (target > env ? attack : release);
 
-    depth += ((on ? 1.0f : 0.0f) * swap - depth) * depthCoef;
+    depth += ((on ? 1.0f : 0.0f) - depth) * depthCoef;
     if (depth < 1.0e-5f) depth = 0.0f;
     if (! std::isfinite (env)) env = 1.0f;
 

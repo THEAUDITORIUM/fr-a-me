@@ -17,7 +17,9 @@ FrameAudioProcessor::FrameAudioProcessor()
 {
     harmoParam = apvts.getRawParameterValue (ParamIDs::harmo);
     gateOnParam = apvts.getRawParameterValue (ParamIDs::gateOn);
-    gatePresetParam = apvts.getRawParameterValue (ParamIDs::gatePreset);
+    gateLengthParam = apvts.getRawParameterValue (ParamIDs::gateLength);
+    for (int i = 0; i < TranceGate::numSteps; ++i)
+        gateStepParam[i] = apvts.getRawParameterValue (ParamIDs::gateStep[i]);
     reverbParam = apvts.getRawParameterValue (ParamIDs::reverb);
     gainParam   = apvts.getRawParameterValue (ParamIDs::gain);
     modeParam = apvts.getRawParameterValue (ParamIDs::mode);
@@ -70,12 +72,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout FrameAudioProcessor::createP
     // 4. GATE : coupe le son sur les temps (16 pas), éteint par défaut, 15 motifs.
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { ParamIDs::gateOn, 1 }, "gate", false));
+    // Pas du gate : vélocité 0 … 1 de chaque pas (0 = fermé), éditables ;
+    // valeurs de départ = motif « bloom ».
     {
-        StringArray names;
-        for (int i = 0; i < TranceGate::numPresets; ++i)
-            names.add (TranceGate::preset (i).name);
-        layout.add (std::make_unique<AudioParameterChoice> (
-            ParameterID { ParamIDs::gatePreset, 1 }, "gate preset", names, 0));
+        const auto& start = TranceGate::preset (0);
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { ParamIDs::gateLength, 1 }, "gate length",
+            NormalisableRange<float> (0.05f, 1.0f, 0.01f), start.length));
+        for (int i = 0; i < TranceGate::numSteps; ++i)
+            layout.add (std::make_unique<AudioParameterFloat> (
+                ParameterID { ParamIDs::gateStep[i], 1 }, "gate step " + String (i + 1),
+                NormalisableRange<float> (0.0f, 1.0f, 0.01f), start.steps[(size_t) i],
+                AudioParameterFloatAttributes()
+                    .withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; })));
     }
 
     // 5. MODE : major / minor.
@@ -395,7 +404,10 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
     proEq.process (outBuffer.getArrayOfWritePointers(), numChannels, numSamples, getEqSettings());
 
     const bool gateOnNow = gateOnParam->load() > 0.5f;
-    const int gatePresetNow = juce::jlimit (0, TranceGate::numPresets - 1, (int) std::lround (finiteOrZero (gatePresetParam->load())));
+    std::array<float, TranceGate::numSteps> gateSteps {};
+    for (int s = 0; s < TranceGate::numSteps; ++s)
+        gateSteps[(size_t) s] = finiteOrZero (gateStepParam[s]->load());
+    const float gateLen = finiteOrZero (gateLengthParam->load());
 
     // 5c. Limiteur de sortie, GATE, vu-mètres, tranches de forme d'onde.
     for (int i = 0; i < numSamples; ++i)
@@ -419,7 +431,7 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
 
         // GATE : coupe sur les temps (sur le son traité ; 0 latence).
-        const float gg = gate.next (blockPpq + ppqPerSample * (double) (startSample + i), gateOnNow, gatePresetNow);
+        const float gg = gate.next (blockPpq + ppqPerSample * (double) (startSample + i), gateOnNow, gateSteps, gateLen);
 
         // SCAN : pendant l'écoute, et tant qu'aucun scan n'est terminé, on
         // n'entend que le son d'origine (brut).
@@ -486,6 +498,26 @@ void FrameAudioProcessor::setIntroDone (bool d)
     apvts.state.setProperty ("introDone", d, nullptr);
 }
 
+void FrameAudioProcessor::loadGatePreset (int index)
+{
+    index = juce::jlimit (0, TranceGate::numPresets - 1, index);
+    const auto& p = TranceGate::preset (index);
+    auto set = [this] (const char* id, float v)
+    {
+        if (auto* prm = apvts.getParameter (id))
+        {
+            prm->beginChangeGesture();
+            prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+            prm->endChangeGesture();
+        }
+    };
+    for (int i = 0; i < TranceGate::numSteps; ++i)
+        set (ParamIDs::gateStep[i], p.steps[(size_t) i]);
+    set (ParamIDs::gateLength, p.length);
+    apvts.state.setProperty ("gatePreset", index, nullptr);
+    apvts.state.setProperty ("gateEdited", false, nullptr);
+}
+
 void FrameAudioProcessor::setKeyReady (bool r)
 {
     keyReady.store (r);
@@ -545,10 +577,9 @@ void FrameAudioProcessor::setStateInformation (const void* data, int sizeInBytes
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
-            // Projets d'avant 3.2 (sans « keyReady ») : l'effet reste actif comme avant.
-            const auto& st = apvts.state;
-            keyReady.store (st.hasProperty ("keyReady") ? (bool) st.getProperty ("keyReady")
-                                                        : (bool) st.getProperty ("introDone", false));
+            // 3.5 : le scan n'est plus imposé au lancement — l'effet est toujours actif
+            // (pendant un scan, la sortie reste le son d'origine, comme avant).
+            keyReady.store (true);
         }
 }
 

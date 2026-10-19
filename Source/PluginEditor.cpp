@@ -14,7 +14,7 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     : processor (p),
       eqView     (p.apvts),
       modeToggle (*p.apvts.getParameter (ParamIDs::mode)),
-      gatePanel  (*p.apvts.getParameter (ParamIDs::gateOn), *p.apvts.getParameter (ParamIDs::gatePreset)),
+      gatePanel  (p.apvts, [&p] (int index) { p.loadGatePreset (index); }),
       scanPage   (p),
       noteRow    (*p.apvts.getParameter (ParamIDs::note))
 {
@@ -34,11 +34,9 @@ FrameCanvas::FrameCanvas (FrameAudioProcessor& p)
     addAndMakeVisible (scanButton);
     scanButton.onClick = [this] { scanPage.open(); };
 
-    // Page de scan : à l'ouverture d'une nouvelle instance (pas encore passée).
+    // Page de scan : seulement à la demande (bouton scan key), plus au lancement.
     addChildComponent (scanPage);
     scanPage.onClose = [this] { repaint(); };
-    if (! processor.isIntroDone())
-        scanPage.open();
 
     setSize (designWidth, designHeight);
     refresh();

@@ -282,9 +282,6 @@ void ScanPage::paint (juce::Graphics& g)
         g.fillRoundedRectangle (sb, sb.getHeight() * 0.5f);
         g.setColour (Palette::ink);
         g.drawRoundedRectangle (sb, sb.getHeight() * 0.5f, 1.1f);
-        drawMonoText (g, "skip scan  >", sb, 13.0f, J::centred, Palette::ink, true, 0.08f);
-        if (! processor.isKeyReady())
-            drawMonoText (g, "until then, fr(a)me lets your raw sound through",
-                          { 0.0f, sb.getBottom() + 12.0f, pageW, 14.0f }, 10.0f, J::centred, Palette::graphite);
+        drawMonoText (g, "back to fr(a)me  >", sb, 13.0f, J::centred, Palette::ink, true, 0.08f);
     }
 }

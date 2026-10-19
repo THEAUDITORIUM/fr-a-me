@@ -4,15 +4,16 @@ Plugin audio d'effet (VST3 · AU · Standalone) qui colore tout le son dans la g
 — notes de la gamme renforcées, espace entre elles creusé, harmoniques justes ajoutées —
 **sans aucune latence** : l'effet sonne exactement en même temps que le son d'origine.
 
-Contrôles : **scan** (page d'accueil : on joue la mélodie, fr(a)me trouve la tonalité et
+Contrôles : **scan key** (à la demande : on joue la mélodie, fr(a)me trouve la tonalité et
 règle tonique + mode), **harmo** (0–100 %, recalage des notes tenues + peigne + harmoniques),
 **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gate** (trance gate
-16 pas calé sur le tempo du DAW, 15 motifs, éteint au lancement), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
+16 pas calé sur le tempo du DAW, éditable pas par pas avec vélocité, 15 motifs de départ,
+éteint au lancement), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
 dans la partie spectrum equalizer (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
 (−24 … +12 dB, petit bouton en haut à droite, à côté de **scan key**). Thème unique : garden.
 Tous automatisables et sauvegardés avec le projet.
 
-| page de scan (au lancement) | la planche |
+| page de scan (bouton scan key) | la planche |
 |---|---|
 | ![scan](docs/interface_scan.png) | ![planche](docs/interface.png) |
 
@@ -321,8 +322,12 @@ est ajouté (queue, porteuses) passe dans la gamme.
 **GATE 3.3** (à la place du pitch, retiré) : trance gate qui coupe le son sur les temps.
 - 16 pas par mesure (doubles croches), calés sur la position et le tempo du DAW ;
   transport arrêté : il tourne seul au tempo du DAW (120 par défaut) ;
-- **éteint au lancement** ; « off / on » (ou un clic sur le motif) pour l'allumer quand on
-  veut ; ‹ › pour changer de motif : bloom, pulse, flutter, gallop, offbeat, pump, chop,
+- **éteint au lancement** ; « off / on » pour l'allumer quand on veut ;
+- **éditable** (3.5) : un clic dans un pas ajoute une barre à la hauteur du clic
+  (vélocité), glisser haut / bas règle la vélocité, glisser de côté peint plusieurs pas,
+  glisser tout en bas, double-clic ou clic droit retire la barre ; les 16 vélocités sont
+  des paramètres automatisables, sauvegardés avec le projet ;
+- ‹ › charge un motif de départ (une étoile après le nom une fois modifié) : bloom, pulse, flutter, gallop, offbeat, pump, chop,
   morse, dotted, tresillo, heart, ripple, swell, sparkle, drift ;
 - chaque pas a son niveau (certains motifs ont des pas à moitié ouverts ou en rampe) et
   une longueur d'ouverture propre au motif ; ouverture ~1 ms, fermeture ~4 ms : net, sans
@@ -391,7 +396,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   vert si le pic a été recalé ;
 - en bas : **harmo** (double-clic = 100 %), **reverb** (double-clic = 30 %), le **gate**
-  (‹ nom du motif ›, les 16 pas avec le pas joué en vert foncé, off / on) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
+  (‹ nom du motif ›, les 16 pas éditables avec le pas joué en vert foncé, off / on) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
 
@@ -402,14 +407,13 @@ au-dessus de la tonique) ; « spectrum » devient « spectrum equalizer ».
 3.2 : planche épurée — une seule bande de son au lieu de deux, plus d'échelles ni de
 rappels sur les bandes, scan key monté à côté du gain.
 
-À l'ouverture d'une nouvelle instance, la **page de scan** s'affiche : gros bouton « scan »,
-on joue la mélodie dans le DAW, la tonalité est trouvée et appliquée, puis la planche
-s'ouvre (bouton **skip scan** pour entrer directement).
+La **page de scan** s'ouvre avec le bouton **scan key** (3.5 : plus au lancement) : gros
+bouton « scan », on joue la mélodie dans le DAW, la tonalité est trouvée et appliquée, puis
+la planche revient (« back to fr(a)me » pour revenir sans scanner).
 
-3.2.1 : **tant que le scan n'est pas lancé et terminé (ou passé avec skip scan), fr(a)me
-laisse passer le son d'origine à l'identique**, sans effet ni décalage ; l'effet arrive en
-fondu de 150 ms avec la tonalité trouvée. L'état est sauvegardé avec le projet (les projets
-d'avant 3.2.1 restent actifs comme avant).
+Pendant un scan, fr(a)me laisse passer le son d'origine à l'identique, sans effet ni
+décalage ; l'effet revient en fondu de 150 ms avec la tonalité trouvée. En dehors d'un
+scan, l'effet est actif dès l'ouverture.
 
 Les bandes partagent le même axe temporel (~9 s, « now » à droite).
 

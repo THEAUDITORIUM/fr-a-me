@@ -29,7 +29,9 @@ namespace ParamIDs
 {
     inline constexpr const char* harmo = "harmo";   // ancien « mix »
     inline constexpr const char* gateOn = "gateOn";        // GATE : marche / arrêt (arrêt au lancement)
-    inline constexpr const char* gatePreset = "gatePreset"; // GATE : motif (15)
+    inline constexpr const char* gateLength = "gateLength"; // GATE : part du pas ouverte
+    inline constexpr const char* gateStep[16] { "gateS1", "gateS2", "gateS3", "gateS4", "gateS5", "gateS6", "gateS7", "gateS8",
+                                                "gateS9", "gateS10", "gateS11", "gateS12", "gateS13", "gateS14", "gateS15", "gateS16" };   // GATE : vélocité des pas
     inline constexpr const char* reverb = "reverb";
     inline constexpr const char* gain   = "gain";
     inline constexpr const char* mode = "mode";
@@ -99,6 +101,8 @@ public:
     bool isScanHolding() const noexcept { return scanHold.load(); }
     /** GATE : pas joué (0 … 15), −1 si éteint. */
     int getGateStep() const noexcept { return gateStep.load(); }
+    /** GATE (fil interface) : charge un motif de départ dans les 16 pas. */
+    void loadGatePreset (int index);
     /** 3.2 : l'effet ne s'active qu'une fois une tonalité trouvée par un scan
         terminé. Avant : la sortie est le son d'origine, tel quel (0 latence).
         Sauvegardé avec le projet. */
@@ -132,13 +136,14 @@ private:
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     KeyDetector keyDetector;              // SCAN : tonalité de la mélodie jouée
     std::atomic<bool> scanHold { false }; // pendant un scan : sortie = son d'origine
-    std::atomic<bool> keyReady { false }; // aucun scan terminé : sortie = son d'origine
+    std::atomic<bool> keyReady { true };  // (3.5 : actif d'emblée ; le scan est à la demande)
     float holdSmoothed = 0.0f, holdIn = 0.01f, holdOut = 0.001f;
     PartialSnapper snapper;               // recalage des partiels tenus sur la gamme (0 latence)
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence
     TranceGate gate;                      // GATE : coupe le son sur les temps (16 pas, calé sur le DAW)
     std::atomic<float>* gateOnParam = nullptr;
-    std::atomic<float>* gatePresetParam = nullptr;
+    std::atomic<float>* gateLengthParam = nullptr;
+    std::atomic<float>* gateStepParam[TranceGate::numSteps] {};
     double blockPpq = 0.0, ppqPerSample = 0.0, freePpq = 0.0;   // position du DAW pour le bloc en cours
     std::atomic<int> gateStep { -1 };     // pas joué (interface), −1 si gate éteint
     ProEq proEq;                          // EQ façon Pro-Q (partie spectrum), juste avant le limiteur

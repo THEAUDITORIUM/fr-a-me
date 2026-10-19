@@ -35,30 +35,49 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
-/** GATE (3.3) : motif de 16 pas (barres façon planche), nom du motif entre
-    deux flèches ‹ ›, et « off / on » dessous (éteint au lancement). */
+/** GATE : motif de 16 pas éditable, nom du motif de départ entre ‹ ›, et
+    « off / on » dessous (éteint au lancement).
+      • clic dans un pas vide : ajoute une barre, à la hauteur du clic (vélocité) ;
+      • glisser haut / bas : vélocité ; glisser de côté : peint plusieurs pas ;
+      • glisser tout en bas, double-clic ou clic droit : retire la barre
+        (clic droit sur un pas vide : barre pleine) ;
+      • ‹ › : charge un motif de départ (« * » après le nom une fois modifié). */
 class GatePanel final : public juce::Component
 {
 public:
-    GatePanel (juce::RangedAudioParameter& onParam, juce::RangedAudioParameter& presetParam);
+    GatePanel (juce::AudioProcessorValueTreeState& apvts, std::function<void (int)> loadPreset);
+    ~GatePanel() override;
 
     /** Pas joué (0 … 15), −1 si éteint : appelé ~30 fois par seconde. */
     void setStep (int s);
 
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
-    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; hoverStep = -1; repaint(); }
 
 private:
+    static constexpr int numSteps = 16;
     juce::Rectangle<float> leftArrow() const noexcept;
     juce::Rectangle<float> rightArrow() const noexcept;
     juce::Rectangle<float> stepsArea() const noexcept;
     juce::Rectangle<float> toggleOption (int index) const noexcept;   // 0 = off, 1 = on
+    int stepAt (float x) const noexcept;
+    float levelAt (float y) const noexcept;
+    void setLevel (int stepIndex, float level);
+    void markEdited();
 
-    bool on = false;
-    int preset = 0, step = -1, hover = -1;
-    std::unique_ptr<juce::ParameterAttachment> onAttachment, presetAttachment;
+    juce::AudioProcessorValueTreeState& state;
+    std::function<void (int)> loadPreset;
+    bool on = false, painting = false;
+    int step = -1, hover = -1, hoverStep = -1, editStep = -1;
+    std::array<float, numSteps> levels {};
+    std::array<bool, numSteps> inGesture {};
+    std::unique_ptr<juce::ParameterAttachment> onAttachment;
+    std::array<std::unique_ptr<juce::ParameterAttachment>, numSteps> stepAttachments;
 };
 
 class NoteRow final : public juce::Component

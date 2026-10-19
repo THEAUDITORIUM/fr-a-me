@@ -3,13 +3,15 @@
     fr(a)me — TranceGate.h
 
     GATE (3.3) : coupe le son sur les temps, en 16 pas par mesure (doubles
-    croches), calé sur le tempo et la position du DAW. 15 motifs prêts à
-    l'emploi ; désactivé au lancement, on l'allume quand on veut.
+    croches), calé sur le tempo et la position du DAW. 15 motifs de départ,
+    puis chaque pas s'édite à la main (ajout, retrait, vélocité) ; désactivé au
+    lancement, on l'allume quand on veut.
 
       • chaque pas a un niveau (0 … 1) ; il s'ouvre au début du pas et se
         referme après une part du pas propre au motif (longueur) ;
       • enveloppe sans clic : ouverture ~1 ms, fermeture ~4 ms ;
-      • allumer / éteindre / changer de motif : fondu de 20 ms ;
+      • allumer / éteindre : fondu de 20 ms ; un pas modifié en cours de
+        lecture glisse avec l'enveloppe (pas de clic) ;
       • transport arrêté : le gate tourne seul au tempo du DAW (120 par défaut).
     0 latence : un simple gain par échantillon, aucune allocation.
   ==============================================================================
@@ -37,8 +39,10 @@ public:
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
 
-    /** Gain pour un échantillon. ppq : position en noires (temps du DAW). */
-    float next (double ppq, bool on, int presetIndex) noexcept;
+    /** Gain pour un échantillon. ppq : position en noires (temps du DAW).
+        steps : niveau (vélocité) des 16 pas, édités par l'utilisateur ;
+        length : part du pas ouverte. */
+    float next (double ppq, bool on, const std::array<float, numSteps>& steps, float length) noexcept;
 
     /** Pas joué (0 … 15), pour l'interface. */
     int getStep() const noexcept { return step; }
@@ -47,6 +51,5 @@ private:
     double sampleRate = 44100.0;
     float env = 1.0f, depth = 0.0f;
     float attack = 0.02f, release = 0.005f, depthCoef = 0.001f;
-    int step = 0, shownPreset = 0;
-    float swap = 1.0f;                             // fondu au changement de motif
+    int step = 0;
 };

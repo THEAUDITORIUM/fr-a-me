@@ -72,21 +72,32 @@ void ModeToggle::mouseUp (const juce::MouseEvent& e)
 //==============================================================================
 //  GatePanel
 //==============================================================================
-GatePanel::GatePanel (juce::RangedAudioParameter& onParam, juce::RangedAudioParameter& presetParam)
+GatePanel::GatePanel (juce::AudioProcessorValueTreeState& apvts, std::function<void (int)> load)
+    : state (apvts), loadPreset (std::move (load))
 {
     setTitle ("gate");
-    onAttachment = std::make_unique<juce::ParameterAttachment> (onParam, [this] (float v)
+    if (auto* p = apvts.getParameter ("gateOn"))
     {
-        on = v > 0.5f;
-        repaint();
-    });
-    presetAttachment = std::make_unique<juce::ParameterAttachment> (presetParam, [this] (float v)
-    {
-        preset = juce::jlimit (0, TranceGate::numPresets - 1, juce::roundToInt (v));
-        repaint();
-    });
-    onAttachment->sendInitialUpdate();
-    presetAttachment->sendInitialUpdate();
+        onAttachment = std::make_unique<juce::ParameterAttachment> (*p, [this] (float v) { on = v > 0.5f; repaint(); });
+        onAttachment->sendInitialUpdate();
+    }
+    for (int i = 0; i < numSteps; ++i)
+        if (auto* p = apvts.getParameter ("gateS" + juce::String (i + 1)))
+        {
+            stepAttachments[(size_t) i] = std::make_unique<juce::ParameterAttachment> (*p, [this, i] (float v)
+            {
+                levels[(size_t) i] = juce::jlimit (0.0f, 1.0f, v);
+                repaint();
+            });
+            stepAttachments[(size_t) i]->sendInitialUpdate();
+        }
+}
+
+GatePanel::~GatePanel()
+{
+    for (int i = 0; i < numSteps; ++i)
+        if (inGesture[(size_t) i] && stepAttachments[(size_t) i] != nullptr)
+            stepAttachments[(size_t) i]->endGesture();
 }
 
 juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 24.0f, 22.0f }; }
@@ -98,6 +109,35 @@ juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
     return { x0 + (float) index * (w + slash), (float) getHeight() - 24.0f, w, 22.0f };
 }
 
+int GatePanel::stepAt (float x) const noexcept
+{
+    const auto sa = stepsArea();
+    return juce::jlimit (0, numSteps - 1, (int) std::floor ((x - sa.getX()) / (sa.getWidth() / (float) numSteps)));
+}
+
+float GatePanel::levelAt (float y) const noexcept
+{
+    const auto sa = stepsArea();
+    const float v = (sa.getBottom() - y) / sa.getHeight();
+    if (v < 0.04f) return 0.0f;                                  // tout en bas : barre retirée
+    return juce::jlimit (0.05f, 1.0f, std::round (v * 100.0f) / 100.0f);
+}
+
+void GatePanel::setLevel (int i, float level)
+{
+    auto& a = stepAttachments[(size_t) i];
+    if (a == nullptr) return;
+    if (! inGesture[(size_t) i]) { a->beginGesture(); inGesture[(size_t) i] = true; }
+    a->setValueAsPartOfGesture (level);
+    markEdited();
+}
+
+void GatePanel::markEdited()
+{
+    if (! (bool) state.state.getProperty ("gateEdited", false))
+        state.state.setProperty ("gateEdited", true, nullptr);
+}
+
 void GatePanel::setStep (int s)
 {
     if (s != step) { step = s; repaint (stepsArea().expanded (2.0f, 6.0f).toNearestInt()); }
@@ -106,7 +146,8 @@ void GatePanel::setStep (int s)
 void GatePanel::paint (juce::Graphics& g)
 {
     using J = juce::Justification;
-    const auto& p = TranceGate::preset (preset);
+    const int presetIndex = juce::jlimit (0, TranceGate::numPresets - 1, (int) state.state.getProperty ("gatePreset", 0));
+    const bool edited = (bool) state.state.getProperty ("gateEdited", false);
 
     // ‹ nom ›
     auto arrow = [&] (juce::Rectangle<float> r, bool left, bool hot)
@@ -122,30 +163,34 @@ void GatePanel::paint (juce::Graphics& g)
     };
     arrow (leftArrow(), true, hover == 0);
     arrow (rightArrow(), false, hover == 1);
-    drawMonoText (g, p.name, { 24.0f, 0.0f, (float) getWidth() - 48.0f, 22.0f }, 13.0f, J::centred, Palette::ink, true, 0.06f);
+    juce::String name (TranceGate::preset (presetIndex).name);
+    if (edited) name << " *";
+    drawMonoText (g, name, { 24.0f, 0.0f, (float) getWidth() - 48.0f, 22.0f }, 13.0f, J::centred, Palette::ink, true, 0.06f);
 
-    // 16 pas : fente fine, barre verte à la hauteur du niveau.
+    // 16 pas : fente fine, barre verte à la hauteur de la vélocité.
     const auto sa = stepsArea();
-    const float cw = sa.getWidth() / (float) TranceGate::numSteps;
-    for (int i = 0; i < TranceGate::numSteps; ++i)
+    const float cw = sa.getWidth() / (float) numSteps;
+    for (int i = 0; i < numSteps; ++i)
     {
         const auto slot = juce::Rectangle<float> (sa.getX() + (float) i * cw + 1.0f, sa.getY(), cw - 2.0f, sa.getHeight());
-        const float lvl = p.steps[(size_t) i];
+        const float lvl = levels[(size_t) i];
         const bool current = on && i == step;
-        g.setColour (Palette::faint);
+        if (i == hoverStep) { g.setColour (Palette::accent.withAlpha (0.15f)); g.fillRoundedRectangle (slot, 1.5f); }
+        g.setColour (i == hoverStep ? Palette::pencil : Palette::faint);
         g.drawRoundedRectangle (slot, 1.5f, 0.6f);
         if (lvl > 0.0f)
         {
             const auto bar = slot.withTop (slot.getBottom() - lvl * slot.getHeight());
             g.setColour (current ? Palette::accentInk : (on ? Palette::accent : Palette::accent.withAlpha (0.4f)));
             g.fillRoundedRectangle (bar, 1.5f);
+            g.setColour (current ? Palette::accentInk : Palette::accentInk.withAlpha (on ? 0.8f : 0.4f));
+            g.fillRect (bar.getX(), bar.getY(), bar.getWidth(), 1.5f);          // trait de vélocité
         }
         else
         {
             g.setColour (Palette::pencil);
             g.fillRect (slot.getX() + 1.0f, slot.getBottom() - 1.5f, slot.getWidth() - 2.0f, 1.0f);
         }
-        // temps forts (1, 5, 9, 13) : petit point dessous ; pas joué : point vert plus gros
         if (current)
         {
             g.setColour (Palette::accentInk);
@@ -157,6 +202,11 @@ void GatePanel::paint (juce::Graphics& g)
             g.fillEllipse (slot.getCentreX() - 1.0f, sa.getBottom() + 4.0f, 2.0f, 2.0f);
         }
     }
+
+    // Pendant l'édition : numéro du pas et vélocité.
+    if (editStep >= 0)
+        drawMonoText (g, "step " + juce::String (editStep + 1) + "  " + juce::String (juce::roundToInt (levels[(size_t) editStep] * 100.0f)) + " %",
+                      { 0.0f, sa.getBottom() + 8.0f, (float) getWidth(), 12.0f }, 9.5f, J::centred, Palette::graphite);
 
     // off / on (même écriture que major / minor)
     const char* labels[2] = { "off", "on" };
@@ -182,29 +232,77 @@ void GatePanel::paint (juce::Graphics& g)
 
 void GatePanel::mouseMove (const juce::MouseEvent& e)
 {
-    int h = -1;
+    int h = -1, hs = -1;
     if (leftArrow().contains (e.position)) h = 0;
     else if (rightArrow().contains (e.position)) h = 1;
     else if (toggleOption (0).contains (e.position)) h = 2;
     else if (toggleOption (1).contains (e.position)) h = 3;
-    setMouseCursor (h >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
-    if (h != hover) { hover = h; repaint(); }
+    else if (stepsArea().contains (e.position)) hs = stepAt (e.position.x);
+    setMouseCursor (h >= 0 ? juce::MouseCursor::PointingHandCursor
+                           : (hs >= 0 ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor));
+    if (h != hover || hs != hoverStep) { hover = h; hoverStep = hs; repaint(); }
+}
+
+void GatePanel::mouseDown (const juce::MouseEvent& e)
+{
+    if (! stepsArea().expanded (0.0f, 4.0f).contains (e.position)) return;
+    const int i = stepAt (e.position.x);
+    if (e.mods.isPopupMenu())                                   // clic droit : retire / remet la barre
+    {
+        if (auto& a = stepAttachments[(size_t) i]; a != nullptr)
+        {
+            a->setValueAsCompleteGesture (levels[(size_t) i] > 0.0f ? 0.0f : 1.0f);
+            markEdited();
+        }
+        return;
+    }
+    painting = true;
+    editStep = i;
+    setLevel (i, juce::jmax (0.05f, levelAt (e.position.y)));   // un clic ajoute toujours une barre
+}
+
+void GatePanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! painting) return;
+    const int i = stepAt (e.position.x);
+    editStep = i;
+    hoverStep = i;
+    setLevel (i, levelAt (e.position.y));
+}
+
+void GatePanel::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    // Double-clic sur un pas : la barre est retirée.
+    if (! stepsArea().contains (e.position)) return;
+    const int i = stepAt (e.position.x);
+    if (auto& a = stepAttachments[(size_t) i]; a != nullptr && ! inGesture[(size_t) i])
+    {
+        a->setValueAsCompleteGesture (0.0f);
+        markEdited();
+    }
 }
 
 void GatePanel::mouseUp (const juce::MouseEvent& e)
 {
+    if (painting)
+    {
+        painting = false;
+        editStep = -1;
+        for (int i = 0; i < numSteps; ++i)
+            if (inGesture[(size_t) i]) { stepAttachments[(size_t) i]->endGesture(); inGesture[(size_t) i] = false; }
+        repaint();
+        return;
+    }
+    for (int i = 0; i < numSteps; ++i)
+        if (inGesture[(size_t) i]) { stepAttachments[(size_t) i]->endGesture(); inGesture[(size_t) i] = false; }
+
     const auto pos = e.position;
     const int n = TranceGate::numPresets;
-    if (leftArrow().contains (pos))
-        presetAttachment->setValueAsCompleteGesture ((float) ((preset + n - 1) % n));
-    else if (rightArrow().contains (pos))
-        presetAttachment->setValueAsCompleteGesture ((float) ((preset + 1) % n));
-    else if (toggleOption (0).contains (pos))
-        onAttachment->setValueAsCompleteGesture (0.0f);
-    else if (toggleOption (1).contains (pos))
-        onAttachment->setValueAsCompleteGesture (1.0f);
-    else if (stepsArea().contains (pos))
-        onAttachment->setValueAsCompleteGesture (on ? 0.0f : 1.0f);   // clic sur le motif : bascule
+    const int current = juce::jlimit (0, n - 1, (int) state.state.getProperty ("gatePreset", 0));
+    if (leftArrow().contains (pos) && loadPreset)       { loadPreset ((current + n - 1) % n); repaint(); }
+    else if (rightArrow().contains (pos) && loadPreset) { loadPreset ((current + 1) % n); repaint(); }
+    else if (toggleOption (0).contains (pos) && onAttachment) onAttachment->setValueAsCompleteGesture (0.0f);
+    else if (toggleOption (1).contains (pos) && onAttachment) onAttachment->setValueAsCompleteGesture (1.0f);
 }
 
 //==============================================================================

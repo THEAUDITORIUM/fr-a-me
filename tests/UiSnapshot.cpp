@@ -44,6 +44,7 @@ int main (int argc, char** argv)
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
     editor->setSize (width, (int) std::round (width * 760.0 / 1000.0));
     auto* canvas = dynamic_cast<FrameCanvas*> (editor->getChildComponent (0));
+    if (showScan && canvas != nullptr) canvas->openScan();
 
     // Signal de démonstration : pad désaccordé, basse, kick / caisse claire.
     juce::AudioBuffer<float> buf (2, block);

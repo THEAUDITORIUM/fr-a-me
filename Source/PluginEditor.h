@@ -29,6 +29,9 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    /** Ouvre la page de scan (comme le bouton scan key). */
+    void openScan() { scanPage.open(); }
+
     /** Appelé par le timer de l'éditeur : vide les FIFO et rafraîchit. */
     void refresh();
 
