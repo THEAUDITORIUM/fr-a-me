@@ -96,6 +96,11 @@ public:
     /** Applique la tonalité trouvée puis rend l'effet (fondu). */
     void applyDetectedKey (int tonic, int mode);
     bool isScanHolding() const noexcept { return scanHold.load(); }
+    /** 3.2 : l'effet ne s'active qu'une fois une tonalité trouvée par un scan
+        terminé. Avant : la sortie est le son d'origine, tel quel (0 latence).
+        Sauvegardé avec le projet. */
+    bool isKeyReady() const noexcept { return keyReady.load(); }
+    void setKeyReady (bool);
     /** Page d'accueil (scan) déjà passée pour cette instance (sauvegardé avec le projet). */
     bool isIntroDone() const;
     void setIntroDone (bool);
@@ -124,6 +129,7 @@ private:
     AmbientReverb reverb;                 // avant l'harmonie : la queue est harmonisée elle aussi
     KeyDetector keyDetector;              // SCAN : tonalité de la mélodie jouée
     std::atomic<bool> scanHold { false }; // pendant un scan : sortie = son d'origine
+    std::atomic<bool> keyReady { false }; // aucun scan terminé : sortie = son d'origine
     float holdSmoothed = 0.0f, holdIn = 0.01f, holdOut = 0.001f;
     PartialSnapper snapper;               // recalage des partiels tenus sur la gamme (0 latence)
     ZeroLatencyHarmonizer harmonizer;     // traitement harmonique, 0 latence

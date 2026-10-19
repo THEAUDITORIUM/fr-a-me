@@ -11,6 +11,8 @@
       • repos      : « appuyez sur scan, puis jouez votre mélodie »
       • écoute     : anneau de progression (~8 s de son joué), tonalité en
                      direct ; un clic sur le bouton arrête et garde le résultat
+      • (3.2) tant qu'aucun scan n'est terminé (ou passé avec « skip scan »),
+                     fr(a)me laisse passer le son d'origine, sans effet
       • terminé    : la tonalité trouvée, appliquée ; « rescan » ou ouverture
                      automatique de la planche après 5 s ; deux autres tonalités
                      proposées en un clic
@@ -47,6 +49,7 @@ private:
     juce::Rectangle<float> buttonBounds() const noexcept;
     juce::Rectangle<float> rescanBounds() const noexcept;
     juce::Rectangle<float> continueBounds() const noexcept;
+    juce::Rectangle<float> skipBounds() const noexcept;
     void close();
     void finish();
 
@@ -57,5 +60,5 @@ private:
     int altTonic[2] { -1, -1 }, altMode[2] { 0, 0 };     // deux autres tonalités proposées
     juce::Rectangle<float> altBounds (int i) const noexcept;
     int listeningTicks = 0, doneTicks = 0;
-    bool hoverButton = false;
+    bool hoverButton = false, hoverSkip = false;
 };

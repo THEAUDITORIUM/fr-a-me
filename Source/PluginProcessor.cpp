@@ -158,7 +158,7 @@ void FrameAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     keyDetector.prepare (sampleRate);                  // SCAN : analyse de l'entrée (seulement pendant un scan)
     holdIn  = 1.0f - std::exp (-1.0f / (0.03f * (float) sampleRate));   // vers le son d'origine : 30 ms
     holdOut = 1.0f - std::exp (-1.0f / (0.15f * (float) sampleRate));   // retour de l'effet : 150 ms
-    holdSmoothed = scanHold.load() ? 1.0f : 0.0f;
+    holdSmoothed = (scanHold.load() || ! keyReady.load()) ? 1.0f : 0.0f;
     proEq.prepare (sampleRate);
     outBuffer.setSize (2, maxChunk, false, true, false);
 
@@ -395,15 +395,20 @@ void FrameAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int st
         limiterGain = needed < limiterGain ? needed : limiterGain + (1.0f - limiterGain) * limiterRelease;
         if (! std::isfinite (limiterGain)) limiterGain = 1.0f;
 
-        // SCAN : pendant l'écoute, on n'entend que le son d'origine (brut).
-        const float holdTarget = scanHold.load (std::memory_order_relaxed) ? 1.0f : 0.0f;
+        // SCAN : pendant l'écoute, et tant qu'aucun scan n'est terminé, on
+        // n'entend que le son d'origine (brut).
+        const float holdTarget = (scanHold.load (std::memory_order_relaxed)
+                                  || ! keyReady.load (std::memory_order_relaxed)) ? 1.0f : 0.0f;
         holdSmoothed += (holdTarget - holdSmoothed) * (holdTarget > holdSmoothed ? holdIn : holdOut);
         if (holdSmoothed < 1.0e-5f) holdSmoothed = 0.0f;
+        if (holdSmoothed > 0.99999f) holdSmoothed = 1.0f;
 
         for (int c = 0; c < numChannels; ++c)
         {
             float y = safetyLimit (outBuffer.getSample (c, i) * limiterGain, invalid);
-            if (holdSmoothed > 0.0f)
+            if (holdSmoothed >= 1.0f)
+                y = dryBuffer.getSample (c, i);                     // son d'origine, à l'identique
+            else if (holdSmoothed > 0.0f)
                 y += holdSmoothed * (dryBuffer.getSample (c, i) - y);
             buffer.setSample (c, startSample + i, y);
             outLo = juce::jmin (outLo, y); outHi = juce::jmax (outHi, y);
@@ -454,6 +459,12 @@ void FrameAudioProcessor::setIntroDone (bool d)
     apvts.state.setProperty ("introDone", d, nullptr);
 }
 
+void FrameAudioProcessor::setKeyReady (bool r)
+{
+    keyReady.store (r);
+    apvts.state.setProperty ("keyReady", r, nullptr);
+}
+
 void FrameAudioProcessor::startScan()
 {
     scanHold.store (true);
@@ -473,6 +484,7 @@ void FrameAudioProcessor::applyDetectedKey (int tonic, int mode)
     // Fil interface : tonique et mode réglés comme si on cliquait (geste complet,
     // l'hôte enregistre le changement et l'automation reste cohérente).
     if (tonic < 0 || tonic > 11) return;
+    setKeyReady (true);                     // premier scan terminé : l'effet s'active
     if (auto* p = apvts.getParameter (ParamIDs::note))
     {
         p->beginChangeGesture();
@@ -504,7 +516,13 @@ void FrameAudioProcessor::setStateInformation (const void* data, int sizeInBytes
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            // Projets d'avant 3.2 (sans « keyReady ») : l'effet reste actif comme avant.
+            const auto& st = apvts.state;
+            keyReady.store (st.hasProperty ("keyReady") ? (bool) st.getProperty ("keyReady")
+                                                        : (bool) st.getProperty ("introDone", false));
+        }
 }
 
 //==============================================================================

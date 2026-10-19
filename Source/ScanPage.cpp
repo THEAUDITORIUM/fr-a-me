@@ -32,6 +32,7 @@ juce::Rectangle<float> ScanPage::buttonBounds() const noexcept
 juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 190.0f + 200.0f * (float) i, 556.0f, 170.0f, 28.0f }; }
 juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 190.0f, 600.0f, 170.0f, 34.0f }; }
 juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 20.0f, 600.0f, 170.0f, 34.0f }; }
+juce::Rectangle<float> ScanPage::skipBounds() const noexcept     { return { pageW * 0.5f - 95.0f, 640.0f, 190.0f, 38.0f }; }
 
 void ScanPage::open()
 {
@@ -49,6 +50,7 @@ void ScanPage::close()
     if (processor.isScanHolding() || processor.getKeyDetector().isScanning())
         processor.cancelScan();                     // l'effet revient
     processor.setIntroDone (true);
+    processor.setKeyReady (true);                   // scan terminé ou « skip scan » : l'effet s'active
     setVisible (false);
     if (onClose) onClose();
 }
@@ -97,8 +99,10 @@ void ScanPage::mouseMove (const juce::MouseEvent& e)
     const bool over = buttonBounds().contains (e.position)
                    || (state == State::done && (rescanBounds().contains (e.position) || continueBounds().contains (e.position)
                                                 || altBounds (0).contains (e.position) || altBounds (1).contains (e.position)))
-                   || juce::Rectangle<float> (pageW * 0.5f - 60.0f, 680.0f, 120.0f, 26.0f).contains (e.position);
+                   || (state != State::done && skipBounds().contains (e.position));
     setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    const bool hs = state != State::done && skipBounds().contains (e.position);
+    if (hs != hoverSkip) { hoverSkip = hs; repaint (skipBounds().expanded (4.0f).toNearestInt()); }
     const bool hb = buttonBounds().contains (e.position);
     if (hb != hoverButton) { hoverButton = hb; repaint(); }
 }
@@ -150,7 +154,7 @@ void ScanPage::mouseUp (const juce::MouseEvent& e)
     }
 
     // « skip » : entrer sans scanner.
-    if (juce::Rectangle<float> (pageW * 0.5f - 60.0f, 680.0f, 120.0f, 26.0f).contains (pos))
+    if (skipBounds().contains (pos))
         close();
 }
 
@@ -272,6 +276,15 @@ void ScanPage::paint (juce::Graphics& g)
     }
     else
     {
-        drawMonoText (g, "skip  >", { pageW * 0.5f - 60.0f, 680.0f, 120.0f, 26.0f }, 11.0f, J::centred, Palette::graphite);
+        // « skip scan » : bien visible ; entre dans la planche, effet actif.
+        const auto sb = skipBounds();
+        g.setColour (hoverSkip ? Palette::accent : Palette::accent.withAlpha (0.35f));
+        g.fillRoundedRectangle (sb, sb.getHeight() * 0.5f);
+        g.setColour (Palette::ink);
+        g.drawRoundedRectangle (sb, sb.getHeight() * 0.5f, 1.1f);
+        drawMonoText (g, "skip scan  >", sb, 13.0f, J::centred, Palette::ink, true, 0.08f);
+        if (! processor.isKeyReady())
+            drawMonoText (g, "until then, fr(a)me lets your raw sound through",
+                          { 0.0f, sb.getBottom() + 12.0f, pageW, 14.0f }, 10.0f, J::centred, Palette::graphite);
     }
 }

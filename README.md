@@ -407,7 +407,12 @@ rappels sur les bandes, scan key monté à côté du gain.
 
 À l'ouverture d'une nouvelle instance, la **page de scan** s'affiche : gros bouton « scan »,
 on joue la mélodie dans le DAW, la tonalité est trouvée et appliquée, puis la planche
-s'ouvre (« skip » pour entrer directement).
+s'ouvre (bouton **skip scan** pour entrer directement).
+
+3.2.1 : **tant que le scan n'est pas lancé et terminé (ou passé avec skip scan), fr(a)me
+laisse passer le son d'origine à l'identique**, sans effet ni décalage ; l'effet arrive en
+fondu de 150 ms avec la tonalité trouvée. L'état est sauvegardé avec le projet (les projets
+d'avant 3.2.1 restent actifs comme avant).
 
 Les bandes partagent le même axe temporel (~9 s, « now » à droite).
 
