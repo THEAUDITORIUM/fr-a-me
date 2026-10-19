@@ -146,7 +146,7 @@ void FrameCanvas::paint (juce::Graphics& g)
         drawMonoText (g, text, { band.getX(), band.getY() - 16.0f, 300.0f, 13.0f }, 11.5f, J::centredLeft, Palette::ink);
     };
     bandLabel ("sound",    soundArea);
-    bandLabel ("spectrum", spectrumArea);
+    bandLabel ("spectrum equalizer", spectrumArea);
     bandLabel ("partials", partialArea);
 
     // Petites légendes à droite des étiquettes (pastille + mot).
@@ -166,15 +166,15 @@ void FrameCanvas::paint (juce::Graphics& g)
     // ---- Zone des contrôles ---------------------------------------------------
     g.setColour (Palette::pencil);
     for (float x = left; x < right; x += 6.0f)                 // ligne pointillée de séparation
-        g.drawHorizontalLine (596, x, juce::jmin (x + 2.0f, right));
+        g.drawHorizontalLine ((int) separatorY, x, juce::jmin (x + 2.0f, right));
 
     const auto knobC = knobArea.toFloat().getCentre();
     const auto reverbC = reverbArea.toFloat().getCentre();
-    drawCallout (g, "harmo",  { left, 616.0f },   { knobC.x,   (float) knobArea.getY() + 2.0f }, true);
-    drawCallout (g, "reverb", { 210.0f, 616.0f }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
-    drawCallout (g, "gate",   { 350.0f, 616.0f }, { (float) gateArea.getCentreX(), (float) gateArea.getY() - 2.0f }, true);
-    drawCallout (g, "mode",   { 488.0f, 616.0f }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
-    drawCallout (g, "tonic",  { 672.0f, 616.0f },
+    drawCallout (g, "harmo",  { left, calloutY },   { knobC.x,   (float) knobArea.getY() + 2.0f }, true);
+    drawCallout (g, "reverb", { 228.0f, calloutY }, { reverbC.x, (float) reverbArea.getY() + 2.0f }, true);
+    drawCallout (g, "gate",   { 400.0f, calloutY }, { (float) gateArea.getCentreX(), (float) gateArea.getY() - 2.0f }, true);
+    drawCallout (g, "mode",   { 672.0f, calloutY }, { (float) modeArea.getCentreX(), (float) modeArea.getY() - 2.0f }, true);
+    drawCallout (g, "tonic",  { 672.0f, (float) modeArea.getBottom() + 8.0f },
                  { (float) noteArea.getX() + noteArea.getWidth() * ((float) noteRow.getNote() + 0.5f) / 12.0f,
                    (float) noteArea.getY() - 2.0f }, true);
 

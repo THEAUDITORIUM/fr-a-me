@@ -62,16 +62,18 @@ private:
     // par-dessus), le spectrum (EQ) et la partition des partiels.
     const juce::Rectangle<float> soundArea    { 80.0f, 116.0f, 840.0f, 116.0f };
     const juce::Rectangle<float> spectrumArea { 80.0f, 266.0f, 840.0f, 160.0f };
-    const juce::Rectangle<float> partialArea  { 80.0f, 458.0f, 840.0f, 112.0f };
+    const juce::Rectangle<float> partialArea  { 80.0f, 458.0f, 840.0f,  70.0f };   // 3.4 : plus basse, les contrôles montent
     // En haut à droite : scan key, puis le petit bouton gain.
     const juce::Rectangle<int>   scanArea     { 742, 18, 124, 26 };
     const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };
-    // Rangée du bas : deux gros boutons (harmo, reverb), gate, mode, tonique.
-    const juce::Rectangle<int>   knobArea     { 110, 630, 92, 92 };
-    const juce::Rectangle<int>   reverbArea   { 240, 630, 92, 92 };
-    const juce::Rectangle<int>   gateArea     { 350, 628, 136, 100 };
-    const juce::Rectangle<int>   modeArea     { 498, 658, 150, 36 };
-    const juce::Rectangle<int>   noteArea     { 672, 651, 248, 50 };
+    // Contrôles (3.4) : trois groupes aérés — son (harmo, reverb), gate, tonalité
+    // (mode au-dessus de la tonique).
+    static constexpr float separatorY = 550.0f, calloutY = 570.0f;
+    const juce::Rectangle<int>   knobArea     { 104, 594, 100, 100 };
+    const juce::Rectangle<int>   reverbArea   { 254, 594, 100, 100 };
+    const juce::Rectangle<int>   gateArea     { 412, 590, 196, 118 };
+    const juce::Rectangle<int>   modeArea     { 712, 590, 170, 36 };
+    const juce::Rectangle<int>   noteArea     { 672, 658, 248, 50 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };

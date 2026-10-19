@@ -8,7 +8,7 @@ Contrôles : **scan** (page d'accueil : on joue la mélodie, fr(a)me trouve la t
 règle tonique + mode), **harmo** (0–100 %, recalage des notes tenues + peigne + harmoniques),
 **reverb** (0–100 %, réverbe ambient granulaire dans la tonalité), **gate** (trance gate
 16 pas calé sur le tempo du DAW, 15 motifs, éteint au lancement), **mode** (major / minor), **tonic** (12 notes), **EQ façon Pro-Q**
-dans la partie spectrum (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
+dans la partie spectrum equalizer (coupe basse, 3 cloches, coupe haute) et **gain** de sortie
 (−24 … +12 dB, petit bouton en haut à droite, à côté de **scan key**). Thème unique : garden.
 Tous automatisables et sauvegardés avec le projet.
 
@@ -386,7 +386,7 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
 (720 px de large par défaut ; redimensionnez par le coin inférieur droit, de 520 à 1500 px).
 
 - **sound** : le son brut (gris) et le son dans la tonalité (vert) superposés ;
-- **spectrum** : EQ façon Pro-Q (fréquences de gauche à droite) sur l'analyseur du son de
+- **spectrum equalizer** : EQ façon Pro-Q (fréquences de gauche à droite) sur l'analyseur du son de
   sortie, avec la tonique de chaque octave ;
 - **partials** : partition graphique noire, un rond par pic détecté (taille = amplitude),
   vert si le pic a été recalé ;
@@ -394,6 +394,10 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   (‹ nom du motif ›, les 16 pas avec le pas joué en vert foncé, off / on) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
+
+3.4 : contrôles réorganisés et aérés — bande partials plus basse, contrôles remontés dans
+la place libérée, trois groupes espacés : son (harmo, reverb), gate, tonalité (mode
+au-dessus de la tonique) ; « spectrum » devient « spectrum equalizer ».
 
 3.2 : planche épurée — une seule bande de son au lieu de deux, plus d'échelles ni de
 rappels sur les bandes, scan key monté à côté du gain.

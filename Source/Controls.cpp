@@ -91,11 +91,11 @@ GatePanel::GatePanel (juce::RangedAudioParameter& onParam, juce::RangedAudioPara
 
 juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 24.0f, 22.0f }; }
 juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float) getWidth() - 24.0f, 0.0f, 24.0f, 22.0f }; }
-juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 29.0f, (float) getWidth(), 38.0f }; }
+juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 32.0f, (float) getWidth(), (float) getHeight() - 32.0f - 38.0f }; }
 juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
 {
     const float w = 46.0f, slash = 18.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
-    return { x0 + (float) index * (w + slash), 76.0f, w, 22.0f };
+    return { x0 + (float) index * (w + slash), (float) getHeight() - 24.0f, w, 22.0f };
 }
 
 void GatePanel::setStep (int s)
