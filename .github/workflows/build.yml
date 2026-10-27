@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -35,6 +38,17 @@ jobs:
         with:
           name: SYNC-Windows
           path: |
+            dist/SYNC-Windows-Installer.exe
+            dist/SYNC-Windows-manual.zip
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sync-v1.0
+          name: SYNC v1.0
+          target_commitish: ${{ github.sha }}
+          body: "SYNC — warp plugin for FL Studio. Windows: run SYNC-Windows-Installer.exe. macOS: open SYNC-macOS.pkg (right-click > Open)."
+          files: |
             dist/SYNC-Windows-Installer.exe
             dist/SYNC-Windows-manual.zip
 
@@ -70,3 +84,11 @@ jobs:
         with:
           name: SYNC-macOS
           path: dist/SYNC-macOS.pkg
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sync-v1.0
+          name: SYNC v1.0
+          target_commitish: ${{ github.sha }}
+          files: dist/SYNC-macOS.pkg
