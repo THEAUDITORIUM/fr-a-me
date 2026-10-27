@@ -1,0 +1,62 @@
+name: Build SYNC
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build VST3 + Standalone
+        run: cmake --build build --config Release --target SYNC_VST3 SYNC_Standalone --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse "build/SYNC_artefacts/Release/VST3/SYNC.vst3" dist/
+          Copy-Item "build/SYNC_artefacts/Release/Standalone/SYNC.exe" dist/
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\windows.iss
+          Compress-Archive -Path dist/SYNC.vst3, dist/SYNC.exe -DestinationPath dist/SYNC-Windows-manual.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SYNC-Windows
+          path: |
+            dist/SYNC-Windows-Installer.exe
+            dist/SYNC-Windows-manual.zip
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3 + AU + Standalone (Universal)
+        run: cmake --build build --config Release --target SYNC_VST3 SYNC_AU SYNC_Standalone --parallel 4
+
+      - name: Package (.pkg)
+        run: |
+          A=build/SYNC_artefacts/Release
+          mkdir -p dist pkgroot/vst3 pkgroot/au pkgroot/app
+          cp -R "$A/VST3/SYNC.vst3" pkgroot/vst3/
+          cp -R "$A/AU/SYNC.component" pkgroot/au/
+          cp -R "$A/Standalone/SYNC.app" pkgroot/app/
+          for b in pkgroot/vst3/SYNC.vst3 pkgroot/au/SYNC.component pkgroot/app/SYNC.app; do codesign --force --deep -s - "$b"; done
+          pkgbuild --root pkgroot/vst3 --identifier com.offkey555.sync.vst3 --version 1.0.0 --install-location "/Library/Audio/Plug-Ins/VST3" vst3.pkg
+          pkgbuild --root pkgroot/au   --identifier com.offkey555.sync.au   --version 1.0.0 --install-location "/Library/Audio/Plug-Ins/Components" au.pkg
+          pkgbuild --root pkgroot/app  --identifier com.offkey555.sync.app  --version 1.0.0 --install-location "/Applications" app.pkg
+          productbuild --package vst3.pkg --package au.pkg --package app.pkg dist/SYNC-macOS.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SYNC-macOS
+          path: dist/SYNC-macOS.pkg
