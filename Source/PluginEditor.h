@@ -22,6 +22,8 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
 
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void fileDragEnter (const juce::StringArray&, int, int) override { dragHover = true; repaint(); }
@@ -34,7 +36,7 @@ private:
         None, Name, Import, Export, Drag, A, B,
         Warp, Source, Half, Double, Mode, Target,
         Grid, Amount, Detect, Host, Preview,
-        Strip, Wave, Marker
+        Ruler, Strip, Wave, Marker
     };
 
     void timerCallback() override;
@@ -53,6 +55,11 @@ private:
     float  xForDst (double dst) const;
     double dstForX (float x) const;
     double samplesPerBeatOut() const;
+    double viewStart() const;
+    double viewLen() const;
+    void   setView (double start, double len);
+    void   zoomAround (float x, double factor);
+    void   scrollBy (double pixels);
 
     juce::Font font (float size, bool medium = false) const;
     void text (juce::Graphics&, const juce::String&, juce::Rectangle<float> r, float size,
@@ -78,10 +85,16 @@ private:
     bool dragHover = false;
     bool externalDragStarted = false;
 
-    // waveform cache (min / max per pixel column)
-    std::vector<float> pkMin, pkMax;
+    // source waveform pyramid (min / max per 64-sample block)
+    static constexpr int kBlock = 64;
+    std::vector<float> blkMin, blkMax;
+    const void* peaksSource = nullptr;
+    float peakNorm = 1.0f;
     int peaksVersion = -1;
-    double peaksTotal = 0.0;
+
+    // zoom / scroll (in output samples). zoomLen <= 0 means "fit".
+    double zoomStart = 0.0, zoomLen = 0.0;
+    double rulerAnchorDst = 0.0, rulerStartLen = 0.0, rulerStartStart = 0.0;
 
     juce::String status;
     double statusUntil = 0.0;

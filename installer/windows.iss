@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=SYNC
-AppVersion=1.0.0
+AppVersion=1.1.0
 AppPublisher=Offkey555
 DefaultDirName={autopf}\Offkey555\SYNC
 DisableDirPage=yes

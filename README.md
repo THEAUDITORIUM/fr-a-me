@@ -23,11 +23,13 @@ quand FL joue, SYNC lit en rythme avec le projet.
 | Amount | Force du calage (100 % = pile sur la grille, moins = garde un peu de groove) |
 | Source | Tempo d'origine détecté. Glisser pour ajuster, double-clic pour taper, `½` / `×2` si lu au double ou à la moitié |
 | Target | Tempo cible (affiche celui de FL en mode Host) |
-| Beats / Flow | Beats = découpe sans aucun artefact (drums, percs). Flow = étirement fluide (mélodies, voix, pads) |
+| Beats / Tones | Le son entre deux marqueurs est étiré (jamais coupé). Beats = étirement serré qui garde les attaques (drums, percs). Tones = étirement fluide (mélodies, voix, pads) |
 | Soft / Medium / Hard | Sensibilité de détection des coups |
 | Level | Volume d'écoute (n'affecte pas l'export) |
 
-**Marqueurs** : glisser un trait pour déplacer un coup (aimanté à la grille, `Shift` = libre),
+**Zoom** : molette sur la waveform = zoom autour de la souris, Shift + molette (ou glisser horizontal au trackpad) = défiler, pincer au trackpad = zoom. Comme dans Ableton : cliquer-glisser la règle des mesures vers le haut/bas = zoom, gauche/droite = défiler ; double-clic sur la règle = tout voir.
+
+**Marqueurs** : glisser un trait pour déplacer un coup — l'audio de part et d'autre s'étire en direct pour suivre (aimanté à la grille, `Shift` = libre),
 double-clic sur la waveform pour ajouter un marqueur, double-clic sur un marqueur pour le supprimer.
 
 Le fichier, les réglages et les marqueurs sont sauvegardés dans le projet FL.

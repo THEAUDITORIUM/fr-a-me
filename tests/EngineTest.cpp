@@ -134,6 +134,34 @@ int main (int argc, char** argv)
     const double outBeat = 60.0 / 128.0 * sr;
     std::printf ("Markers: %zu  output length %.3f beats\n", markers.size(), markers.back().dst / outBeat);
 
+    // ---- manual drag: pull one marker far to the right (segment stretched x2+) ----
+    {
+        auto mk = markers;
+        const size_t k = 5;
+        const double room = mk[k + 1].dst - mk[k].dst;
+        const double before = mk[k].dst - mk[k - 1].dst;
+        mk[k].dst += room * 0.8;                       // previous segment gets much longer
+        auto longestQuiet = [&] (const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            int run = 0, best = 0;
+            for (int i = from; i < to; ++i)
+            {
+                float v = 0.0f;
+                for (int ch = 0; ch < b.getNumChannels(); ++ch) v = std::max (v, std::abs (b.getSample (ch, i)));
+                run = v < 1.0e-4f ? run + 1 : 0; best = std::max (best, run);
+            }
+            return best;
+        };
+        juce::AudioBuffer<float> out;
+        warp::render (loop, sr, mk, warp::Mode::Beats, out);
+        const int segFrom = (int) mk[k - 1].dst, segTo = (int) mk[k].dst;
+        const int srcFrom = (int) mk[k - 1].src, srcTo = (int) mk[k].src;
+        std::printf ("[Drag] segment %.2f -> %.2f beats (x%.2f)  longest silence: source %.1f ms, warped %.1f ms\n",
+                     before / outBeat, (mk[k].dst - mk[k - 1].dst) / outBeat, (mk[k].dst - mk[k - 1].dst) / before,
+                     longestQuiet (loop, srcFrom, srcTo) / sr * 1000.0, longestQuiet (out, segFrom, segTo) / sr * 1000.0);
+        writeWav (out, sr, outDir.getChildFile ("test_drag_stretch.wav"));
+    }
+
     for (auto mode : { warp::Mode::Beats, warp::Mode::Flow })
     {
         juce::AudioBuffer<float> out;
@@ -149,6 +177,7 @@ int main (int argc, char** argv)
             const double grid = outBeat * 0.5;
             const double dev = std::abs (o.pos - std::round (o.pos / grid) * grid);
             maxDev = std::max (maxDev, dev); sumDev += dev;
+            if (dev > 0.005 * sr) std::printf ("   off-grid onset at %.1f ms (dev %.1f ms, strength %.3f)\n", o.pos / sr * 1000.0, dev / sr * 1000.0, o.strength);
         }
         float peak = out.getMagnitude (0, out.getNumSamples());
         std::printf ("[%s] render %.1f ms  len %.3f beats  onsets %zu  grid dev mean %.2f ms max %.2f ms  peak %.2f\n",

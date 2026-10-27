@@ -129,14 +129,48 @@ double SyncEditor::totalDst() const
     return 1.0;
 }
 
+double SyncEditor::viewLen() const
+{
+    const double total = totalDst();
+    return zoomLen > 0.0 ? juce::jmin (zoomLen, total) : total;
+}
+
+double SyncEditor::viewStart() const
+{
+    return zoomLen > 0.0 ? juce::jlimit (0.0, juce::jmax (0.0, totalDst() - viewLen()), zoomStart) : 0.0;
+}
+
+void SyncEditor::setView (double start, double len)
+{
+    const double total = totalDst();
+    const double minLen = juce::jmax (64.0, (double) rWave.getWidth() * 0.5);   // ~2 px per sample max zoom
+    len = juce::jlimit (juce::jmin (minLen, total), total, len);
+    if (len >= total * 0.999) { zoomLen = 0.0; zoomStart = 0.0; }
+    else { zoomLen = len; zoomStart = juce::jlimit (0.0, total - len, start); }
+    repaint();
+}
+
+void SyncEditor::zoomAround (float x, double factor)
+{
+    const double anchor = dstForX (x);
+    const double frac = juce::jlimit (0.0, 1.0, (double) (x - (float) rWave.getX()) / (double) rWave.getWidth());
+    const double len = viewLen() * factor;
+    setView (anchor - frac * len, len);
+}
+
+void SyncEditor::scrollBy (double pixels)
+{
+    setView (viewStart() + pixels * viewLen() / (double) rWave.getWidth(), viewLen());
+}
+
 float SyncEditor::xForDst (double dst) const
 {
-    return (float) rWave.getX() + (float) (dst / totalDst()) * (float) rWave.getWidth();
+    return (float) rWave.getX() + (float) ((dst - viewStart()) / viewLen()) * (float) rWave.getWidth();
 }
 
 double SyncEditor::dstForX (float x) const
 {
-    return juce::jlimit (0.0, totalDst(), (double) (x - (float) rWave.getX()) / (double) rWave.getWidth() * totalDst());
+    return juce::jlimit (0.0, totalDst(), viewStart() + (double) (x - (float) rWave.getX()) / (double) rWave.getWidth() * viewLen());
 }
 
 double SyncEditor::samplesPerBeatOut() const
@@ -148,31 +182,29 @@ double SyncEditor::samplesPerBeatOut() const
 
 void SyncEditor::rebuildPeaks()
 {
-    pkMin.clear(); pkMax.clear();
-    auto r = proc.getRendered();
-    if (r == nullptr || r->getNumSamples() == 0) return;
+    auto src = proc.getSource();
+    peaksSource = src.get();
+    blkMin.clear(); blkMax.clear();
+    if (src == nullptr || src->getNumSamples() == 0) return;
 
-    const int cols = rWave.getWidth();
-    const double total = totalDst();
-    peaksTotal = total;
-    pkMin.assign ((size_t) cols, 0.0f);
-    pkMax.assign ((size_t) cols, 0.0f);
-
+    const int n = src->getNumSamples();
+    const int nb = (n + kBlock - 1) / kBlock;
+    blkMin.assign ((size_t) nb, 0.0f);
+    blkMax.assign ((size_t) nb, 0.0f);
     float mx = 1.0e-6f;
-    for (int c = 0; c < cols; ++c)
+    for (int k = 0; k < nb; ++k)
     {
-        const int a = juce::jmin (r->getNumSamples() - 1, (int) (total * c / cols));
-        const int b = juce::jmax (a + 1, juce::jmin (r->getNumSamples(), (int) (total * (c + 1) / cols)));
         float lo = 0.0f, hi = 0.0f;
-        for (int ch = 0; ch < r->getNumChannels(); ++ch)
+        const int e = juce::jmin (n, (k + 1) * kBlock);
+        for (int ch = 0; ch < src->getNumChannels(); ++ch)
         {
-            auto* d = r->getReadPointer (ch);
-            for (int i = a; i < b; ++i) { lo = juce::jmin (lo, d[i]); hi = juce::jmax (hi, d[i]); }
+            auto* d = src->getReadPointer (ch);
+            for (int i = k * kBlock; i < e; ++i) { lo = juce::jmin (lo, d[i]); hi = juce::jmax (hi, d[i]); }
         }
-        pkMin[(size_t) c] = lo; pkMax[(size_t) c] = hi;
+        blkMin[(size_t) k] = lo; blkMax[(size_t) k] = hi;
         mx = juce::jmax (mx, juce::jmax (hi, -lo));
     }
-    for (size_t c = 0; c < pkMin.size(); ++c) { pkMin[c] /= mx; pkMax[c] /= mx; }
+    peakNorm = 1.0f / mx;
 }
 
 // ============================================================================
@@ -247,7 +279,7 @@ void SyncEditor::paint (juce::Graphics& g)
     box (g, rSource, has ? juce::String (st.sourceBpm, 2) : utf8 ("\xe2\x80\x94"), Hit::Source, false, has);
     box (g, rHalf, ":2", Hit::Half, false, has);
     box (g, rDouble, "*2", Hit::Double, false, has);
-    box (g, rMode, (proc.getMode() == warp::Mode::Beats ? "Beats" : "Flow") + utf8 ("  \xe2\x96\xbe"), Hit::Mode);
+    box (g, rMode, (proc.getMode() == warp::Mode::Beats ? "Beats" : "Tones") + utf8 ("  \xe2\x96\xbe"), Hit::Mode);
     label (g, rTarget, "Target");
     text (g, proc.isHostSync() ? "FL" : utf8 ("\xe2\x86\xba FL"), rHost.toFloat(), 10.5f,
           proc.isHostSync() ? col::faint : (hover == Hit::Host ? col::white : col::dim), proc.isHostSync() ? false : true,
@@ -283,22 +315,41 @@ void SyncEditor::paint (juce::Graphics& g)
 
     const double total = totalDst();
     const double spb = samplesPerBeatOut();
+    const double v0 = viewStart(), vl = viewLen();
 
-    if (has && spb > 0.0 && total / spb < 600.0)
+    if (has && spb > 0.0)
     {
-        int beat = 0;
-        const bool showBeats = rWave.getWidth() / (total / spb) > 6.0;
-        for (double d = 0.0; d < total - 1.0; d += spb, ++beat)
+        const double pxPerBeat = rWave.getWidth() * spb / vl;
+        const int gridDiv = proc.getSettings().gridDiv;
+        const int sub = pxPerBeat * 4.0 / gridDiv > 10.0 ? gridDiv / 4 : (pxPerBeat > 6.0 ? 1 : 0); // subdivisions per beat
+        int barEvery = 1;
+        while (pxPerBeat * 4.0 * barEvery < 34.0 && barEvery < 4096) barEvery *= 2;
+
+        const double step = sub > 0 ? spb / sub : spb * 4.0;
+        const int perBar = sub > 0 ? sub * 4 : 1;
+        long long k0 = (long long) std::floor (v0 / step);
+        for (long long k = juce::jmax (0LL, k0); ; ++k)
         {
+            const double d = (double) k * step;
+            if (d > v0 + vl || d > total - 1.0) break;
             const float x = std::round (xForDst (d));
-            const bool bar = beat % 4 == 0;
-            if (! bar && ! showBeats) continue;
-            g.setColour (bar ? col::barLine : col::beatLine);
-            g.fillRect (x, (float) rWave.getY(), 1.0f, (float) rWave.getHeight());
+            const bool bar = k % perBar == 0;
+            const bool beat = sub > 0 && (k % juce::jmax (1, sub)) == 0;
+            const long long barIdx = (long long) k / perBar;
+
+            g.setColour (bar ? col::barLine : (beat ? col::beatLine : col::beatLine.withAlpha (0.55f)));
+            if (bar || beat || pxPerBeat / juce::jmax (1, sub) > 14.0)
+                g.fillRect (x, (float) rWave.getY(), 1.0f, (float) rWave.getHeight());
+
+            const float tick = bar ? 9.0f : (beat ? 5.0f : 3.0f);
             g.setColour (bar ? col::dim : col::faint);
-            g.fillRect (x, (float) rRuler.getBottom() - (bar ? 9.0f : 4.0f), 1.0f, bar ? 9.0f : 4.0f);
-            if (bar)
-                text (g, juce::String (beat / 4 + 1), juce::Rectangle<float> (x + 3.0f, (float) rRuler.getY(), 30.0f, 14.0f), 10.5f, col::dim);
+            g.fillRect (x, (float) rRuler.getBottom() - tick, 1.0f, tick);
+
+            if (bar && barIdx % barEvery == 0)
+                text (g, juce::String (barIdx + 1), juce::Rectangle<float> (x + 3.0f, (float) rRuler.getY(), 40.0f, 14.0f), 10.5f, col::dim);
+            else if (beat && ! bar && pxPerBeat > 46.0)
+                text (g, juce::String (barIdx + 1) + "." + juce::String ((k % perBar) / juce::jmax (1, sub) + 1),
+                      juce::Rectangle<float> (x + 3.0f, (float) rRuler.getY(), 40.0f, 14.0f), 9.5f, col::faint);
         }
     }
 
@@ -317,13 +368,43 @@ void SyncEditor::paint (juce::Graphics& g)
     }
     else
     {
-        // waveform
-        g.setColour (col::wave);
-        for (size_t c = 0; c < pkMax.size(); ++c)
+        // waveform: drawn from the original through the warp map, so it
+        // stretches instantly while a marker is being dragged
+        if (auto src = proc.getSource(); src != nullptr && ! blkMin.empty())
         {
-            const float x = (float) rWave.getX() + (float) c;
-            const float top = cy - pkMax[c] * hh, bot = cy - pkMin[c] * hh;
-            g.fillRect (x, top, 1.0f, juce::jmax (1.0f, bot - top));
+            const auto& mk = proc.getMarkers();
+            const int n = src->getNumSamples();
+            const int cols = rWave.getWidth();
+            const float* ch0 = src->getReadPointer (0);
+            const float* ch1 = src->getReadPointer (juce::jmin (1, src->getNumChannels() - 1));
+            g.setColour (col::wave);
+            double sPrev = warp::dstToSrc (mk, dstForX ((float) rWave.getX()));
+            for (int c = 0; c < cols; ++c)
+            {
+                const double d1 = v0 + (double) (c + 1) / cols * vl;
+                if (v0 + (double) c / cols * vl >= total) break;
+                const double sNext = warp::dstToSrc (mk, juce::jmin (d1, total));
+                int a = juce::jlimit (0, n - 1, (int) std::floor (juce::jmin (sPrev, sNext)));
+                int b = juce::jlimit (a + 1, n, (int) std::ceil (juce::jmax (sPrev, sNext)));
+                sPrev = sNext;
+
+                float lo = 0.0f, hi = 0.0f;
+                if (b - a > kBlock * 2)
+                {
+                    for (int k = a / kBlock; k <= (b - 1) / kBlock; ++k)
+                    { lo = juce::jmin (lo, blkMin[(size_t) k]); hi = juce::jmax (hi, blkMax[(size_t) k]); }
+                }
+                else
+                {
+                    for (int i = a; i < b; ++i)
+                    {
+                        lo = juce::jmin (lo, juce::jmin (ch0[i], ch1[i]));
+                        hi = juce::jmax (hi, juce::jmax (ch0[i], ch1[i]));
+                    }
+                }
+                const float top = cy - hi * peakNorm * hh, bot = cy - lo * peakNorm * hh;
+                g.fillRect ((float) (rWave.getX() + c), top, 1.0f, juce::jmax (1.0f, bot - top));
+            }
         }
 
         // warp markers: flag in the strip + hairline through the wave
@@ -331,6 +412,7 @@ void SyncEditor::paint (juce::Graphics& g)
         for (int i = 1; i + 1 < (int) m.size(); ++i)
         {
             const float x = std::round (xForDst (m[(size_t) i].dst)) + 0.5f;
+            if (x < (float) rWave.getX() - 6.0f || x > (float) rWave.getRight() + 6.0f) continue;
             const bool active = (i == hoverMarker && (hover == Hit::Marker)) || i == dragMarker;
 
             g.setColour (active ? col::white.withAlpha (0.8f) : col::white.withAlpha (0.12f));
@@ -356,8 +438,11 @@ void SyncEditor::paint (juce::Graphics& g)
         {
             const double d = proc.listenB.load() ? ph : warp::srcToDst (m, ph);
             const float x = xForDst (d);
-            g.setColour (col::white);
-            g.fillRect (x - 0.5f, (float) rStrip.getY(), 1.5f, (float) (rWave.getBottom() - rStrip.getY()));
+            if (x >= (float) rWave.getX() && x <= (float) rWave.getRight())
+            {
+                g.setColour (col::white);
+                g.fillRect (x - 0.5f, (float) rStrip.getY(), 1.5f, (float) (rWave.getBottom() - rStrip.getY()));
+            }
         }
 
         if (dragHover)
@@ -371,8 +456,20 @@ void SyncEditor::paint (juce::Graphics& g)
             text (g, status.replace ("\n", "  "), rWave.toFloat().reduced (8.0f, 6.0f), 11.0f, col::dim, false,
                   juce::Justification::bottomLeft);
 
+        // scroll indicator when zoomed in
+        if (zoomLen > 0.0)
+        {
+            const float w = (float) rWave.getWidth();
+            const float bx = (float) rWave.getX() + (float) (v0 / total) * w;
+            const float bw = juce::jmax (12.0f, (float) (vl / total) * w);
+            g.setColour (col::faint.withAlpha (0.35f));
+            g.fillRect ((float) rWave.getX(), (float) rWave.getBottom() - 3.0f, w, 3.0f);
+            g.setColour (col::dim);
+            g.fillRect (bx, (float) rWave.getBottom() - 3.0f, bw, 3.0f);
+        }
+
         // corner readout, like Ableton's zoom/grid indicator
-        text (g, "1/" + juce::String (st.gridDiv), rWave.toFloat().reduced (8.0f, 6.0f), 13.0f, col::faint, true,
+        text (g, "1/" + juce::String (st.gridDiv), rWave.toFloat().reduced (8.0f, 8.0f), 13.0f, col::faint, true,
               juce::Justification::bottomRight);
     }
 }
@@ -394,7 +491,7 @@ juce::String SyncEditor::helpFor (Hit h) const
         case Hit::Source:  return "Original tempo (detected)\nDrag up/down, double-click to type";
         case Hit::Half:    return "Halve the original tempo";
         case Hit::Double:  return "Double the original tempo";
-        case Hit::Mode:    return "Beats: slices, no artefacts (drums)\nFlow: smooth stretch (melodies, vocals)";
+        case Hit::Mode:    return "Beats: tight stretch (drums)\nTones: smooth stretch (melodies, vocals)";
         case Hit::Target:  return proc.isHostSync() ? "Follows FL Studio's tempo\nTurn off 'Follow FL tempo' to set it"
                                                     : "Tempo to warp to\nDrag up/down, double-click to type";
         case Hit::Grid:    return "Grid the hits snap to\nClick: next  " + utf8 ("\xc2\xb7") + "  right-click: previous";
@@ -402,8 +499,9 @@ juce::String SyncEditor::helpFor (Hit h) const
         case Hit::Detect:  return "Transient detection sensitivity\nClick to change";
         case Hit::Host:    return "Warp to FL's tempo (re-warps\nautomatically when the tempo changes)";
         case Hit::Preview: return "Loop the result while FL is stopped";
+        case Hit::Ruler:   return "Drag up/down: zoom  " + utf8 ("\xc2\xb7") + "  left/right: scroll\nDouble-click: zoom to fit";
         case Hit::Strip:
-        case Hit::Wave:    return "Double-click: add a warp marker";
+        case Hit::Wave:    return "Wheel: zoom  " + utf8 ("\xc2\xb7") + "  Shift+wheel: scroll\nDouble-click: add a warp marker";
         case Hit::Marker:  return "Drag to move (Shift = off grid)\nDouble-click to delete";
         case Hit::None:    break;
     }
@@ -425,6 +523,7 @@ SyncEditor::Hit SyncEditor::hitTest (juce::Point<int> p, int& markerIndex) const
     markerIndex = -1;
     const bool has = proc.hasSample();
 
+    if (has && rRuler.contains (p)) return Hit::Ruler;
     if (has && (rStrip.contains (p) || rWave.contains (p)))
     {
         const auto& m = proc.getMarkers();
@@ -470,6 +569,7 @@ void SyncEditor::mouseMove (const juce::MouseEvent& e)
     switch (h)
     {
         case Hit::Marker:  setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
+        case Hit::Ruler:   setMouseCursor (juce::MouseCursor::UpDownLeftRightResizeCursor); break;
         case Hit::Source: case Hit::Amount:
                            setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
         case Hit::Target:  setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
@@ -501,6 +601,11 @@ void SyncEditor::mouseDown (const juce::MouseEvent& e)
     switch (pressed)
     {
         case Hit::Marker:  dragMarker = mi; break;
+        case Hit::Ruler:
+            rulerAnchorDst  = dstForX ((float) e.getPosition().x);
+            rulerStartLen   = viewLen();
+            rulerStartStart = viewStart();
+            break;
         case Hit::Amount:  dragStartValue = st.amount; break;
         case Hit::Source:  dragStartValue = st.sourceBpm; break;
         case Hit::Target:  dragStartValue = proc.isHostSync() ? proc.getHostBpm() : st.targetBpm; break;
@@ -557,9 +662,23 @@ void SyncEditor::mouseDrag (const juce::MouseEvent& e)
 
     switch (pressed)
     {
+        case Hit::Ruler:
+        {
+            // Ableton-style: vertical = zoom around the grabbed point, horizontal = scroll
+            const double len = rulerStartLen * std::pow (2.0, -dy / 60.0);
+            const double frac = (double) (downPos.x - rWave.getX()) / (double) rWave.getWidth();
+            const double dx = (double) (e.getPosition().x - downPos.x) * len / (double) rWave.getWidth();
+            setView (rulerAnchorDst - frac * len - dx, len);
+            break;
+        }
         case Hit::Marker:
         {
             if (dragMarker < 0) break;
+            if (zoomLen > 0.0)
+            {
+                if (e.getPosition().x < rWave.getX())     scrollBy (-6.0);
+                if (e.getPosition().x > rWave.getRight()) scrollBy (6.0);
+            }
             double dst = dstForX ((float) e.getPosition().x);
             if (proc.isWarped() && ! e.mods.isShiftDown())
             {
@@ -607,6 +726,7 @@ void SyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
     switch (hitTest (e.getPosition(), mi))
     {
         case Hit::Marker: proc.removeMarker (mi); break;
+        case Hit::Ruler:  setView (0.0, totalDst()); break;
         case Hit::Strip:
         case Hit::Wave:   proc.addMarkerAtDst (dstForX ((float) e.getPosition().x)); break;
         case Hit::Source: beginTextEdit (Hit::Source); break;
@@ -615,6 +735,35 @@ void SyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
         default: break;
     }
     repaint();
+}
+
+void SyncEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    const auto p = e.getPosition();
+    if (! proc.hasSample() || ! (rRuler.contains (p) || rStrip.contains (p) || rWave.contains (p)))
+    {
+        Component::mouseWheelMove (e, w);
+        return;
+    }
+
+    const bool horizontal = std::abs (w.deltaX) > std::abs (w.deltaY);
+    if (horizontal || e.mods.isShiftDown())
+    {
+        const float d = horizontal ? w.deltaX : w.deltaY;
+        scrollBy ((double) (w.isReversed ? d : -d) * 400.0);
+    }
+    else
+    {
+        float d = w.isReversed ? -w.deltaY : w.deltaY;
+        if (w.isSmooth) d *= 0.6f;                         // trackpads send many small steps
+        zoomAround ((float) p.x, std::pow (2.0, -(double) d * 4.0));
+    }
+}
+
+void SyncEditor::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
+{
+    if (proc.hasSample() && rWave.getUnion (rRuler).contains (e.getPosition()) && scaleFactor > 0.0f)
+        zoomAround ((float) e.getPosition().x, 1.0 / (double) scaleFactor);
 }
 
 // ============================================================================
@@ -699,6 +848,7 @@ void SyncEditor::loadFile (const juce::File& f)
     if (proc.loadFile (f, err))
     {
         peaksVersion = -1;
+        zoomLen = 0.0; zoomStart = 0.0;
         setStatus (f.getFileName() + "\n" + juce::String (proc.getSettings().sourceBpm, 2) + " bpm detected", 3.0);
     }
     else setStatus ("Could not load\n" + err, 4.0);
@@ -746,10 +896,11 @@ void SyncEditor::timerCallback()
 {
     bool dirty = false;
 
-    if (proc.getRenderVersion() != peaksVersion || (proc.hasSample() && std::abs (totalDst() - peaksTotal) > 1.0))
+    if (proc.getRenderVersion() != peaksVersion)
     {
         peaksVersion = proc.getRenderVersion();
-        rebuildPeaks();
+        if (proc.getSource().get() != peaksSource) rebuildPeaks();
+        if (zoomLen > 0.0) setView (zoomStart, zoomLen);   // keep the view valid after a re-warp
         dirty = true;
     }
 

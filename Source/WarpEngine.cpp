@@ -365,9 +365,11 @@ static void renderSliceBeats (const juce::AudioBuffer<float>& src, double sr,
     }
 }
 
-// Segment renderer: Flow mode — WSOLA (waveform-similarity overlap-add).
-static void renderSliceFlow (const juce::AudioBuffer<float>& src, const std::vector<float>& mono, double sr,
-                             int a, int b, int c, int lenDst, juce::AudioBuffer<float>& out)
+// Segment renderer — WSOLA time-stretch (waveform-similarity overlap-add).
+// The audio between two warp markers is stretched or squeezed to fit, never cut.
+// grainMs: short for Beats (tight transients), long for Tones (smooth sustain).
+static void renderSliceStretch (const juce::AudioBuffer<float>& src, const std::vector<float>& mono, double sr,
+                                int a, int b, int c, int lenDst, double grainMs, juce::AudioBuffer<float>& out)
 {
     const int lenSrc = b - a;
     if (lenSrc <= 0 || lenDst <= 0) return;
@@ -380,16 +382,20 @@ static void renderSliceFlow (const juce::AudioBuffer<float>& src, const std::vec
         return;
     }
 
-    const int N   = sr > 60000.0 ? 4096 : 2048;
-    const int Hs  = N / 2;
+    int N = 256;
+    while (N < (int) (grainMs * 0.001 * sr)) N <<= 1;
+    const int Hs  = N / 4;          // 75 % overlap: smoother, no ghost attacks
     const int tol = N / 4;
-    const double Ha = (double) Hs / alpha;
+    juce::ignoreUnused (alpha);
+    const int lockLen = juce::jmin (N, lenSrc / 2, lenDst / 2);
+    const double restRatio = lenSrc > lockLen && lenDst > lockLen
+                                 ? (double) (lenSrc - lockLen) / (double) (lenDst - lockLen) : 1.0;
 
     std::vector<float> win ((size_t) N), win0 ((size_t) N);
     for (int i = 0; i < N; ++i)
     {
         win[(size_t) i]  = 0.5f - 0.5f * std::cos (2.0f * juce::MathConstants<float>::pi * (float) i / (float) N);
-        win0[(size_t) i] = i < N / 2 ? 1.0f : win[(size_t) i]; // flat start keeps the transient intact
+        win0[(size_t) i] = i < N / 2 ? 1.0f : win[(size_t) i]; // first grain: flat start keeps the transient intact
     }
 
     const int chans = out.getNumChannels();
@@ -406,8 +412,12 @@ static void renderSliceFlow (const juce::AudioBuffer<float>& src, const std::vec
         const int o0 = j * Hs;
         // never read the next hit into this slice (it would double the attack)
         const int maxPos = juce::jmax (a, b - juce::jmin (N, lenDst - o0) - 32);
-        const int nominal = juce::jmin (maxPos, a + (int) std::lround (j * Ha));
-        if (j == 0) pos = a;
+        // the attack is copied verbatim (phase-locked) over the first grain,
+        // the stretch happens on the body/tail of the hit
+        const double nomD = o0 < lockLen ? (double) o0
+                                         : lockLen + (o0 - lockLen) * restRatio;
+        const int nominal = juce::jmin (maxPos, a + (int) std::lround (nomD));
+        if (o0 + N <= lockLen + N / 2 && a + o0 <= maxPos) pos = a + o0;
         else
         {
             const int natural = prevPos + Hs;
@@ -477,7 +487,6 @@ void render (const juce::AudioBuffer<float>& source, double sr,
     if (m.size() < 2 || source.getNumSamples() == 0) return;
 
     std::vector<float> mono;
-    if (mode == Mode::Flow)
     {
         mono.assign ((size_t) source.getNumSamples(), 0.0f);
         for (int ch = 0; ch < source.getNumChannels(); ++ch)
@@ -497,8 +506,7 @@ void render (const juce::AudioBuffer<float>& source, double sr,
         const int d = (int) std::lround (m[i + 1].dst);
         if (b <= a || d <= c) continue;
 
-        if (mode == Mode::Beats) renderSliceBeats (source, sr, a, b, c, d - c, out);
-        else                     renderSliceFlow  (source, mono, sr, a, b, c, d - c, out);
+        renderSliceStretch (source, mono, sr, a, b, c, d - c, mode == Mode::Beats ? 23.0 : 46.0, out);
 
         // short crossfade just before each slice so the next transient is
         // never softened (the fade happens on the pre-attack material)

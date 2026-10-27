@@ -60,8 +60,8 @@ std::vector<Marker> identityMarkers (const std::vector<Onset>& onsets, int numSa
 std::vector<Marker> computeWarp (const std::vector<Onset>& onsets, int numSamples,
                                  double sampleRate, const WarpSettings& s);
 
-// Renders the warped audio.  Beats = slice & place (zero artefacts on drums),
-// Flow = WSOLA time-stretch per segment (for sustained / tonal material).
+// Renders the warped audio: every segment between two markers is time-stretched
+// to its new length. Beats = short grains (drums), Flow/Tones = long grains.
 void render (const juce::AudioBuffer<float>& source, double sampleRate,
              const std::vector<Marker>& markers, Mode mode,
              juce::AudioBuffer<float>& out);

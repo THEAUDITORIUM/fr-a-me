@@ -44,16 +44,20 @@ jobs:
       - name: Publish to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: sync-v1.0
-          name: SYNC v1.0
+          tag_name: sync-v1.1
+          name: SYNC v1.1
           target_commitish: ${{ github.sha }}
-          body: "SYNC — warp plugin for FL Studio. Windows: run SYNC-Windows-Installer.exe. macOS: open SYNC-macOS.pkg (right-click > Open)."
+          body: "SYNC 1.1 — stretch warp (no more cuts), mouse-wheel zoom. Windows: run SYNC-Windows-Installer.exe. macOS: open SYNC-macOS.pkg (right-click > Open)."
           files: |
             dist/SYNC-Windows-Installer.exe
             dist/SYNC-Windows-manual.zip
 
   macos:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,20 +79,20 @@ jobs:
           cp -R "$A/AU/SYNC.component" pkgroot/au/
           cp -R "$A/Standalone/SYNC.app" pkgroot/app/
           for b in pkgroot/vst3/SYNC.vst3 pkgroot/au/SYNC.component pkgroot/app/SYNC.app; do codesign --force --deep -s - "$b"; done
-          pkgbuild --root pkgroot/vst3 --identifier com.offkey555.sync.vst3 --version 1.0.0 --install-location "/Library/Audio/Plug-Ins/VST3" vst3.pkg
-          pkgbuild --root pkgroot/au   --identifier com.offkey555.sync.au   --version 1.0.0 --install-location "/Library/Audio/Plug-Ins/Components" au.pkg
-          pkgbuild --root pkgroot/app  --identifier com.offkey555.sync.app  --version 1.0.0 --install-location "/Applications" app.pkg
+          pkgbuild --root pkgroot/vst3 --identifier com.offkey555.sync.vst3 --version 1.1.0 --install-location "/Library/Audio/Plug-Ins/VST3" vst3.pkg
+          pkgbuild --root pkgroot/au   --identifier com.offkey555.sync.au   --version 1.1.0 --install-location "/Library/Audio/Plug-Ins/Components" au.pkg
+          pkgbuild --root pkgroot/app  --identifier com.offkey555.sync.app  --version 1.1.0 --install-location "/Applications" app.pkg
           productbuild --package vst3.pkg --package au.pkg --package app.pkg dist/SYNC-macOS.pkg
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SYNC-macOS
+          name: SYNC-macOS-${{ matrix.runner }}
           path: dist/SYNC-macOS.pkg
 
       - name: Publish to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: sync-v1.0
-          name: SYNC v1.0
+          tag_name: sync-v1.1
+          name: SYNC v1.1
           target_commitish: ${{ github.sha }}
           files: dist/SYNC-macOS.pkg
