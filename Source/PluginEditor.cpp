@@ -640,11 +640,17 @@ void SyncEditor::beginTextEdit (Hit which)
                                                   : (proc.isHostSync() ? proc.getHostBpm() : st.targetBpm), 2), false);
     t.selectAll();
 
-    auto close = [this]
+    juce::Component::SafePointer<SyncEditor> safeThis (this);
+    auto close = [safeThis]
     {
-        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SyncEditor> (this)]
+        juce::MessageManager::callAsync ([safeThis]
         {
-            if (safe != nullptr) { safe->textEdit.reset(); safe->textEditTarget = Hit::None; safe->repaint(); }
+            if (auto* ed = safeThis.getComponent())
+            {
+                ed->textEdit.reset();
+                ed->textEditTarget = Hit::None;
+                ed->repaint();
+            }
         });
     };
     t.onReturnKey = [this, close]
