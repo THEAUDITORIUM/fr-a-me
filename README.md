@@ -408,6 +408,14 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
 
+3.7 : **planche allégée, textes plus gros**. Retirés : la bande partials, l'axe du temps,
+« plate », le sous-titre, les décors des marges, le brin dessiné, les traits de rappel et les
+petites phrases d'aide. En haut : le titre, un gros bouton **scan key** vert et le **gain**.
+Puis deux bandes (**sound**, **spectrum equalizer**) et quatre cartes claires avec un grand
+titre : **HARMO** et **REVERB** (gros bouton, valeur en gros), **GATE** (‹ motif ›, pas,
+off / on), **KEY** (major / minor, tonique, et la tonalité écrite en clair). La page de scan
+est allégée de la même façon.
+
 3.4 : contrôles réorganisés et aérés — bande partials plus basse, contrôles remontés dans
 la place libérée, trois groupes espacés : son (harmo, reverb), gate, tonalité (mode
 au-dessus de la tonique) ; « spectrum » devient « spectrum equalizer ».

@@ -173,7 +173,7 @@ namespace
 // dans les marges, un petit croquis au crayon en haut à gauche.
 namespace { constexpr int decorBlocks[] = { 0, 2, 4 }; }   // haut gauche, haut droite, bas gauche
 
-void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
+void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page, bool withBlocks)
 {
     juce::Random rng (0x6a4d3e);
     paperGrain (g, page, rng, juce::Colour (0xff6c8f3a), juce::Colour (0xff8a8572));
@@ -182,6 +182,7 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
     int k = 0;
     for (int bi : decorBlocks)
     {
+        if (! withBlocks) break;
         const auto b = collageBlocks[bi];
         const auto path = tornRect (b, rng);
         g.setColour (greens[k % 3].withAlpha (0.18f));
@@ -209,24 +210,4 @@ void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page)
         ++k;
     }
 
-    // Brin dessiné au crayon, en haut à gauche (un bouton rose au bout).
-    juce::Path stem;
-    stem.startNewSubPath (196.0f, 64.0f);
-    stem.cubicTo (200.0f, 48.0f, 206.0f, 34.0f, 218.0f, 22.0f);
-    g.setColour (juce::Colour (0xff6c8f3a).withAlpha (0.7f));
-    g.strokePath (stem, juce::PathStrokeType (1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    auto leaf = [&g] (float x, float y, float angle, float len)
-    {
-        juce::Path l;
-        l.startNewSubPath (0.0f, 0.0f);
-        l.quadraticTo (len * 0.5f, -len * 0.35f, len, 0.0f);
-        l.quadraticTo (len * 0.5f, len * 0.35f, 0.0f, 0.0f);
-        g.strokePath (l, juce::PathStrokeType (0.85f), juce::AffineTransform::rotation (angle).translated (x, y));
-    };
-    leaf (199.0f, 50.0f, -2.6f, 11.0f);
-    leaf (203.0f, 40.0f, -0.5f, 10.0f);
-    leaf (209.0f, 31.0f, -2.4f, 9.0f);
-    leaf (215.0f, 25.0f, -0.8f, 8.0f);
-    g.setColour (juce::Colour (0xffe8a3b6).withAlpha (0.8f));
-    g.fillEllipse (216.0f, 18.5f, 4.5f, 4.5f);
 }

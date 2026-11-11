@@ -49,11 +49,11 @@ void ModeToggle::paint (juce::Graphics& g)
             g.fillRect (r.reduced (2.0f, r.getHeight() * 0.18f));
         }
 
-        drawMonoText (g, labels[i], r, 15.0f, juce::Justification::centred,
+        drawMonoText (g, labels[i], r, 17.0f, juce::Justification::centred,
                       active ? Palette::onAccent : Palette::pencil, active);
     }
 
-    drawMonoText (g, "/", getLocalBounds().toFloat(), 15.0f, juce::Justification::centred, Palette::pencil);
+    drawMonoText (g, "/", getLocalBounds().toFloat(), 17.0f, juce::Justification::centred, Palette::pencil);
 }
 
 void ModeToggle::mouseUp (const juce::MouseEvent& e)
@@ -100,13 +100,13 @@ GatePanel::~GatePanel()
             stepAttachments[(size_t) i]->endGesture();
 }
 
-juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 24.0f, 22.0f }; }
-juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float) getWidth() - 24.0f, 0.0f, 24.0f, 22.0f }; }
-juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 32.0f, (float) getWidth(), (float) getHeight() - 32.0f - 38.0f }; }
+juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 32.0f, 30.0f }; }
+juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float) getWidth() - 32.0f, 0.0f, 32.0f, 30.0f }; }
+juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 42.0f, (float) getWidth(), (float) getHeight() - 42.0f - 66.0f }; }
 juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
 {
-    const float w = 46.0f, slash = 18.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
-    return { x0 + (float) index * (w + slash), (float) getHeight() - 24.0f, w, 22.0f };
+    const float w = 64.0f, slash = 20.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
+    return { x0 + (float) index * (w + slash), (float) getHeight() - 32.0f, w, 30.0f };
 }
 
 int GatePanel::stepAt (float x) const noexcept
@@ -154,18 +154,19 @@ void GatePanel::paint (juce::Graphics& g)
     {
         const auto c = r.getCentre();
         juce::Path a;
-        a.startNewSubPath (c.x + (left ? 3.0f : -3.0f), c.y - 6.0f);
-        a.lineTo (c.x + (left ? -3.0f : 3.0f), c.y);
-        a.lineTo (c.x + (left ? 3.0f : -3.0f), c.y + 6.0f);
-        if (hot) { g.setColour (Palette::accent.withAlpha (0.45f)); g.fillEllipse (r.withSizeKeepingCentre (20.0f, 20.0f)); }
+        a.startNewSubPath (c.x + (left ? 4.0f : -4.0f), c.y - 8.0f);
+        a.lineTo (c.x + (left ? -4.0f : 4.0f), c.y);
+        a.lineTo (c.x + (left ? 4.0f : -4.0f), c.y + 8.0f);
+        g.setColour (hot ? Palette::accent : Palette::faint);
+        g.fillEllipse (r.withSizeKeepingCentre (28.0f, 28.0f));
         g.setColour (Palette::ink);
-        g.strokePath (a, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (a, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     };
     arrow (leftArrow(), true, hover == 0);
     arrow (rightArrow(), false, hover == 1);
     juce::String name (TranceGate::preset (presetIndex).name);
     if (edited) name << " *";
-    drawMonoText (g, name, { 24.0f, 0.0f, (float) getWidth() - 48.0f, 22.0f }, 13.0f, J::centred, Palette::ink, true, 0.06f);
+    drawMonoText (g, name, { 32.0f, 0.0f, (float) getWidth() - 64.0f, 30.0f }, 17.0f, J::centred, Palette::ink, true, 0.06f);
 
     // 16 pas : fente fine, barre verte à la hauteur de la vélocité.
     const auto sa = stepsArea();
@@ -206,7 +207,7 @@ void GatePanel::paint (juce::Graphics& g)
     // Pendant l'édition : numéro du pas et vélocité.
     if (editStep >= 0)
         drawMonoText (g, "step " + juce::String (editStep + 1) + "  " + juce::String (juce::roundToInt (levels[(size_t) editStep] * 100.0f)) + " %",
-                      { 0.0f, sa.getBottom() + 8.0f, (float) getWidth(), 12.0f }, 9.5f, J::centred, Palette::graphite);
+                      { 0.0f, sa.getBottom() + 12.0f, (float) getWidth(), 16.0f }, 12.0f, J::centred, Palette::graphite);
 
     // off / on (même écriture que major / minor)
     const char* labels[2] = { "off", "on" };
@@ -224,10 +225,10 @@ void GatePanel::paint (juce::Graphics& g)
             g.setColour (Palette::accent.withAlpha (0.25f));
             g.fillRect (r.reduced (2.0f, r.getHeight() * 0.16f));
         }
-        drawMonoText (g, labels[i], r, 13.0f, J::centred, active ? Palette::onAccent : Palette::pencil, active);
+        drawMonoText (g, labels[i], r, 17.0f, J::centred, active ? Palette::onAccent : Palette::pencil, active);
     }
     const auto t0 = toggleOption (0), t1 = toggleOption (1);
-    drawMonoText (g, "/", { t0.getRight(), t0.getY(), t1.getX() - t0.getRight(), t0.getHeight() }, 13.0f, J::centred, Palette::pencil);
+    drawMonoText (g, "/", { t0.getRight(), t0.getY(), t1.getX() - t0.getRight(), t0.getHeight() }, 17.0f, J::centred, Palette::pencil);
 }
 
 void GatePanel::mouseMove (const juce::MouseEvent& e)
@@ -363,7 +364,7 @@ void NoteRow::paint (juce::Graphics& g)
         g.setColour (Palette::ink);
         g.drawRect (r, 0.7f);
 
-        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), 11.0f,
+        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 8.0f : 0.0f), 13.5f,
                       juce::Justification::centred, active ? Palette::onAccent : Palette::graphite, active, 0.04f);
 
         // Point sous les notes de la gamme courante (jaune pour la tonique).
@@ -371,7 +372,7 @@ void NoteRow::paint (juce::Graphics& g)
         {
             const float cx = r.getCentreX(), cy = r.getBottom() + 6.0f;
             g.setColour (active ? Palette::accentInk : Palette::ink);
-            g.fillEllipse (cx - 2.0f, cy - 2.0f, 4.0f, 4.0f);
+            g.fillEllipse (cx - 2.5f, cy - 2.5f, 5.0f, 5.0f);
         }
     }
 }
@@ -426,16 +427,20 @@ void ScanButton::paint (juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat().reduced (1.0f);
     const float rr = b.getHeight() * 0.5f;
-    if (hover) { g.setColour (Palette::accent.withAlpha (0.35f)); g.fillRoundedRectangle (b, rr); }
+    // Bouton principal bien visible : pastille verte pleine.
+    g.setColour (hover ? Palette::accent : Palette::accent.withAlpha (0.55f));
+    g.fillRoundedRectangle (b, rr);
     g.setColour (Palette::ink);
-    g.drawRoundedRectangle (b, rr, 0.8f);
+    g.drawRoundedRectangle (b, rr, 1.1f);
     // pictogramme : cercles concentriques (écoute)
-    const juce::Point<float> c (b.getX() + rr + 2.0f, b.getCentreY());
-    g.fillEllipse (c.x - 1.6f, c.y - 1.6f, 3.2f, 3.2f);
-    g.drawEllipse (c.x - 4.5f, c.y - 4.5f, 9.0f, 9.0f, 0.7f);
-    g.setColour (Palette::accentInk);
-    g.drawEllipse (c.x - 7.5f, c.y - 7.5f, 15.0f, 15.0f, 0.7f);
-    drawMonoText (g, "scan key", b.withTrimmedLeft (rr * 2.0f + 2.0f), 11.0f, juce::Justification::centredLeft, Palette::ink);
+    const float k = b.getHeight() / 26.0f;
+    const juce::Point<float> c (b.getX() + rr + 4.0f, b.getCentreY());
+    g.fillEllipse (c.x - 1.8f * k, c.y - 1.8f * k, 3.6f * k, 3.6f * k);
+    g.drawEllipse (c.x - 4.5f * k, c.y - 4.5f * k, 9.0f * k, 9.0f * k, 1.0f);
+    g.setColour (Palette::accentInk.darker (0.3f));
+    g.drawEllipse (c.x - 7.5f * k, c.y - 7.5f * k, 15.0f * k, 15.0f * k, 1.0f);
+    drawMonoText (g, "SCAN KEY", b.withTrimmedLeft (rr * 2.0f + 4.0f), juce::jmax (11.0f, b.getHeight() * 0.38f),
+                  juce::Justification::centredLeft, Palette::ink, true, 0.08f);
 }
 
 void ScanButton::mouseUp (const juce::MouseEvent& e)
@@ -565,7 +570,7 @@ void EqView::paint (juce::Graphics& g)
         g.setColour (Palette::faint);
         g.drawVerticalLine ((int) x, 0.0f, h);
         drawMonoText (g, f >= 1000.0f ? juce::String ((int) (f / 1000.0f)) + "k" : juce::String ((int) f),
-                      { x + 2.0f, h - 13.0f, 30.0f, 11.0f }, 8.0f, juce::Justification::centredLeft, Palette::pencil);
+                      { x + 3.0f, h - 16.0f, 36.0f, 14.0f }, 10.5f, juce::Justification::centredLeft, Palette::graphite);
     }
     for (float db : { -12.0f, 12.0f })
     {
@@ -580,9 +585,9 @@ void EqView::paint (juce::Graphics& g)
         if (hz < eqLoHz || hz > eqHiHz) continue;
         const float x = xFor (hz);
         g.setColour (Palette::scaleInk.withAlpha (0.45f));
-        g.drawVerticalLine ((int) x, 12.0f, h);
+        g.drawVerticalLine ((int) x, 15.0f, h);
         drawMonoText (g, juce::String (frame::noteNames[juce::jlimit (0, 11, tonic)]) + juce::String (octave),
-                      { x - 14.0f, 1.0f, 28.0f, 10.0f }, 7.5f, juce::Justification::centred, Palette::accentInk);
+                      { x - 16.0f, 1.0f, 32.0f, 13.0f }, 10.0f, juce::Justification::centred, Palette::accentInk);
     }
 
     // Analyseur (son de sortie) : surface pleine, du bas vers le niveau.

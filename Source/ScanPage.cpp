@@ -163,12 +163,10 @@ void ScanPage::paint (juce::Graphics& g)
     using J = juce::Justification;
     const auto page = getLocalBounds().toFloat();
     g.fillAll (Palette::paper);
-    drawGardenDecor (g, page);
+    drawGardenDecor (g, page, false);
 
     // En-tête (comme la planche).
     drawMonoText (g, "fr(a)me", { 0.0f, 60.0f, pageW, 40.0f }, 34.0f, J::centred, Palette::ink, true, 0.28f);
-    drawMonoText (g, "( spectral harmoniser )", { 0.0f, 104.0f, pageW, 16.0f }, 11.0f, J::centred, Palette::graphite);
-    drawMonoText (g, "plate 00", { 80.0f, 22.0f, 100.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil);
 
     // Le gros bouton.
     const auto b = buttonBounds();
@@ -213,25 +211,24 @@ void ScanPage::paint (juce::Graphics& g)
     if (state == State::idle)
     {
         drawMonoText (g, "scan", b.withTrimmedBottom (20.0f), 40.0f, J::centred, Palette::ink, true, 0.25f);
-        drawMonoText (g, "key finder", b.withTrimmedTop (70.0f), 11.0f, J::centred, Palette::graphite);
+        drawMonoText (g, "key finder", b.withTrimmedTop (70.0f), 14.0f, J::centred, Palette::graphite);
     }
     else if (state == State::listening)
     {
         drawMonoText (g, "listening", b.withTrimmedBottom (30.0f), 22.0f, J::centred, Palette::ink, true, 0.2f);
-        drawMonoText (g, juce::String (juce::roundToInt (progress * 100.0f)) + " %", b.withTrimmedTop (40.0f), 13.0f, J::centred, Palette::graphite);
+        drawMonoText (g, juce::String (juce::roundToInt (progress * 100.0f)) + " %", b.withTrimmedTop (40.0f), 16.0f, J::centred, Palette::graphite);
     }
     else
     {
         drawMonoText (g, keyName (tonic, mode), b.withTrimmedBottom (20.0f), 30.0f, J::centred, Palette::onAccent, true, 0.12f);
-        drawMonoText (g, "applied", b.withTrimmedTop (70.0f), 11.0f, J::centred, Palette::onAccent);
+        drawMonoText (g, "applied", b.withTrimmedTop (70.0f), 14.0f, J::centred, Palette::onAccent);
     }
 
     // Texte sous le bouton.
     juce::String line1, line2;
     if (state == State::idle)
     {
-        line1 = "press scan, then play your melody in your daw";
-        line2 = "fr(a)me finds the key and sets tonic & mode";
+        // repos : aucun texte, le gros bouton suffit
     }
     else if (state == State::listening)
     {
@@ -247,8 +244,8 @@ void ScanPage::paint (juce::Graphics& g)
         line1 = "tonic & mode set : " + keyName (tonic, mode);
         line2 = "not quite ? try one of these :";
     }
-    drawMonoText (g, line1, { 0.0f, 506.0f, pageW, 18.0f }, 13.0f, J::centred, Palette::ink);
-    drawMonoText (g, line2, { 0.0f, 530.0f, pageW, 16.0f }, 10.5f, J::centred, Palette::graphite);
+    drawMonoText (g, line1, { 0.0f, 500.0f, pageW, 22.0f }, 16.0f, J::centred, Palette::ink);
+    drawMonoText (g, line2, { 0.0f, 528.0f, pageW, 18.0f }, 13.0f, J::centred, Palette::graphite);
 
     if (state == State::done)
     {
@@ -257,7 +254,7 @@ void ScanPage::paint (juce::Graphics& g)
             if (filled) { g.setColour (Palette::accent); g.fillRoundedRectangle (rr, 17.0f); }
             g.setColour (Palette::ink);
             g.drawRoundedRectangle (rr, 17.0f, 0.9f);
-            drawMonoText (g, t, rr, 12.0f, J::centred, Palette::ink, filled);
+            drawMonoText (g, t, rr, 14.0f, J::centred, Palette::ink, filled);
         };
         for (int i = 0; i < 2; ++i)
             if (altTonic[i] >= 0)
@@ -265,7 +262,7 @@ void ScanPage::paint (juce::Graphics& g)
                 const auto ab = altBounds (i);
                 g.setColour (Palette::pencil);
                 g.drawRoundedRectangle (ab, 14.0f, 0.7f);
-                drawMonoText (g, "or  " + keyName (altTonic[i], altMode[i]), ab, 11.0f, J::centred, Palette::graphite);
+                drawMonoText (g, "or  " + keyName (altTonic[i], altMode[i]), ab, 13.0f, J::centred, Palette::graphite);
             }
         pill (rescanBounds(), "rescan", false);
         pill (continueBounds(), "open fr(a)me  >", true);
@@ -282,6 +279,6 @@ void ScanPage::paint (juce::Graphics& g)
         g.fillRoundedRectangle (sb, sb.getHeight() * 0.5f);
         g.setColour (Palette::ink);
         g.drawRoundedRectangle (sb, sb.getHeight() * 0.5f, 1.1f);
-        drawMonoText (g, "back to fr(a)me  >", sb, 13.0f, J::centred, Palette::ink, true, 0.08f);
+        drawMonoText (g, "back to fr(a)me  >", sb, 15.0f, J::centred, Palette::ink, true, 0.08f);
     }
 }

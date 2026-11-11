@@ -37,14 +37,12 @@ public:
 
 
 private:
-    void drawTimeAxis (juce::Graphics&, juce::Rectangle<float> span);
 
     FrameAudioProcessor& processor;
 
     WaveBand inputBand  { WaveBand::Source::input };
     WaveBand outputBand { WaveBand::Source::output };
     EqView eqView;                        // partie spectrum : EQ façon Pro-Q + analyseur
-    PartialScore partialBand;
 
     juce::Slider harmoKnob, reverbKnob, gainKnob;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmoAttachment, reverbAttachment, gainAttachment;
@@ -60,23 +58,24 @@ private:
 
     uint16_t shownMask = 0;
 
-    // Géométrie (unités de conception) — 3.2 : planche épurée.
-    // Une seule bande « sound » (son brut en gris, son dans la tonalité en vert
-    // par-dessus), le spectrum (EQ) et la partition des partiels.
-    const juce::Rectangle<float> soundArea    { 80.0f, 116.0f, 840.0f, 116.0f };
-    const juce::Rectangle<float> spectrumArea { 80.0f, 266.0f, 840.0f, 160.0f };
-    const juce::Rectangle<float> partialArea  { 80.0f, 458.0f, 840.0f,  70.0f };   // 3.4 : plus basse, les contrôles montent
-    // En haut à droite : scan key, puis le petit bouton gain.
-    const juce::Rectangle<int>   scanArea     { 742, 18, 124, 26 };
-    const juce::Rectangle<int>   gainArea     { 884, 12, 40, 40 };
-    // Contrôles (3.4) : trois groupes aérés — son (harmo, reverb), gate, tonalité
-    // (mode au-dessus de la tonique).
-    static constexpr float separatorY = 550.0f, calloutY = 570.0f;
-    const juce::Rectangle<int>   knobArea     { 104, 594, 100, 100 };
-    const juce::Rectangle<int>   reverbArea   { 254, 594, 100, 100 };
-    const juce::Rectangle<int>   gateArea     { 412, 590, 196, 118 };
-    const juce::Rectangle<int>   modeArea     { 712, 590, 170, 36 };
-    const juce::Rectangle<int>   noteArea     { 672, 658, 248, 50 };
+    // Géométrie (unités de conception) — 3.7 : planche allégée, textes plus gros.
+    // En-tête (titre, scan key, gain), deux bandes (sound, spectrum equalizer),
+    // puis quatre cartes de contrôles : HARMO, REVERB, GATE, KEY.
+    const juce::Rectangle<float> soundArea    { 80.0f, 120.0f, 840.0f,  72.0f };
+    const juce::Rectangle<float> spectrumArea { 80.0f, 240.0f, 840.0f, 180.0f };
+    const juce::Rectangle<int>   scanArea     { 598, 26, 192, 42 };
+    const juce::Rectangle<int>   gainArea     { 806, 22, 50, 50 };
+
+    const juce::Rectangle<float> harmoCard    {  80.0f, 450.0f, 140.0f, 278.0f };
+    const juce::Rectangle<float> reverbCard   { 236.0f, 450.0f, 140.0f, 278.0f };
+    const juce::Rectangle<float> gateCard     { 392.0f, 450.0f, 240.0f, 278.0f };
+    const juce::Rectangle<float> keyCard      { 648.0f, 450.0f, 272.0f, 278.0f };
+
+    const juce::Rectangle<int>   knobArea     {  95, 528, 110, 110 };
+    const juce::Rectangle<int>   reverbArea   { 251, 528, 110, 110 };
+    const juce::Rectangle<int>   gateArea     { 404, 510, 216, 206 };
+    const juce::Rectangle<int>   modeArea     { 660, 512, 248, 44 };
+    const juce::Rectangle<int>   noteArea     { 660, 602, 248, 64 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };

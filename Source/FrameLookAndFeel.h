@@ -58,7 +58,7 @@ void drawMonoText (juce::Graphics& g, const juce::String& text, juce::Rectangle<
 
 /** Décor du thème « garden » (sobre) : trois aplats d'herbe couchée dans les
     marges, brin au crayon ; le fond reste blanc. */
-void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page);
+void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page, bool withBlocks = true);
 
 
 
