@@ -2,7 +2,7 @@
   ==============================================================================
     fr(a)me — PluginEditor.h
 
-    Interface : une "planche" de 1000 × 760 unités dessinée en vectoriel puis
+    Interface : une "planche" de 880 × 592 unités dessinée en vectoriel puis
     mise à l'échelle (redimensionnement libre à proportions fixes).
   ==============================================================================
 */
@@ -21,8 +21,8 @@
 class FrameCanvas final : public juce::Component
 {
 public:
-    static constexpr int designWidth  = 1000;
-    static constexpr int designHeight = 760;
+    static constexpr int designWidth  = 880;
+    static constexpr int designHeight = 592;
 
     explicit FrameCanvas (FrameAudioProcessor&);
 
@@ -64,24 +64,24 @@ private:
     juce::Image staticLayer;
     float staticScale = 0.0f;
 
-    // Géométrie (unités de conception) — 3.7 : planche allégée, textes plus gros.
-    // En-tête (titre, scan key, gain), deux bandes (sound, spectrum equalizer),
-    // puis quatre cartes de contrôles : HARMO, REVERB, GATE, KEY.
-    const juce::Rectangle<float> soundArea    { 80.0f, 120.0f, 840.0f,  72.0f };
-    const juce::Rectangle<float> spectrumArea { 80.0f, 240.0f, 840.0f, 180.0f };
-    const juce::Rectangle<int>   scanArea     { 598, 26, 192, 42 };
-    const juce::Rectangle<int>   gainArea     { 806, 22, 50, 50 };
+    // Géométrie (unités de conception) — 3.9 : compacte, sans cartes ; les
+    // commandes sortent directement de la matière.
+    const juce::Rectangle<float> soundArea    { 44.0f, 112.0f, 792.0f,  48.0f };
+    const juce::Rectangle<float> spectrumArea { 44.0f, 212.0f, 792.0f, 118.0f };
+    const juce::Rectangle<int>   scanArea     { 552, 18, 168, 50 };
+    const juce::Rectangle<int>   gainArea     { 734, 21, 44, 44 };
 
-    const juce::Rectangle<float> harmoCard    {  80.0f, 450.0f, 140.0f, 278.0f };
-    const juce::Rectangle<float> reverbCard   { 236.0f, 450.0f, 140.0f, 278.0f };
-    const juce::Rectangle<float> gateCard     { 392.0f, 450.0f, 240.0f, 278.0f };
-    const juce::Rectangle<float> keyCard      { 648.0f, 450.0f, 272.0f, 278.0f };
+    // Rangée du bas : quatre zones (titre au-dessus).
+    const juce::Rectangle<float> harmoZone    {  36.0f, 374.0f, 140.0f, 210.0f };
+    const juce::Rectangle<float> reverbZone   { 176.0f, 374.0f, 140.0f, 210.0f };
+    const juce::Rectangle<float> gateZone     { 324.0f, 374.0f, 236.0f, 210.0f };
+    const juce::Rectangle<float> keyZone      { 572.0f, 374.0f, 272.0f, 210.0f };
 
-    const juce::Rectangle<int>   knobArea     {  95, 528, 110, 110 };
-    const juce::Rectangle<int>   reverbArea   { 251, 528, 110, 110 };
-    const juce::Rectangle<int>   gateArea     { 404, 510, 216, 206 };
-    const juce::Rectangle<int>   modeArea     { 660, 512, 248, 44 };
-    const juce::Rectangle<int>   noteArea     { 660, 602, 248, 64 };
+    const juce::Rectangle<int>   knobArea     {  54, 404, 104, 104 };
+    const juce::Rectangle<int>   reverbArea   { 194, 404, 104, 104 };
+    const juce::Rectangle<int>   gateArea     { 336, 398, 212, 180 };
+    const juce::Rectangle<int>   modeArea     { 586, 404, 244, 42 };
+    const juce::Rectangle<int>   noteArea     { 582, 478, 252, 60 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrameCanvas)
 };

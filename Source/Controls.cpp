@@ -97,7 +97,7 @@ GatePanel::~GatePanel()
 
 juce::Rectangle<float> GatePanel::leftArrow() const noexcept  { return { 0.0f, 0.0f, 32.0f, 30.0f }; }
 juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float) getWidth() - 32.0f, 0.0f, 32.0f, 30.0f }; }
-juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 42.0f, (float) getWidth(), (float) getHeight() - 42.0f - 66.0f }; }
+juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 8.0f, 44.0f, (float) getWidth() - 16.0f, (float) getHeight() - 44.0f - 62.0f }; }
 juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
 {
     const float w = 70.0f, slash = 0.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
@@ -166,26 +166,26 @@ void GatePanel::paint (juce::Graphics& g)
     // Un seul puits creusé ; les barres y sont posées (gris doux, plus dense
     // quand le gate est allumé, le pas joué le plus sombre).
     const auto sa = stepsArea();
-    Relief::inset (g, sa.expanded (3.0f), 8.0f, 3.5f);
+    Relief::inset (g, sa.expanded (8.0f, 6.0f), 22.0f, 4.5f);
     const float cw = sa.getWidth() / (float) numSteps;
     for (int i = 0; i < numSteps; ++i)
     {
         const auto slot = juce::Rectangle<float> (sa.getX() + (float) i * cw + 1.5f, sa.getY() + 3.0f, cw - 3.0f, sa.getHeight() - 6.0f);
         const float lvl = levels[(size_t) i];
         const bool current = on && i == step;
-        if (i == hoverStep) { g.setColour (juce::Colours::white.withAlpha (0.55f)); g.fillRoundedRectangle (slot, 2.5f); }
+        if (i == hoverStep) { g.setColour (juce::Colours::white.withAlpha (0.55f)); g.fillRoundedRectangle (slot, slot.getWidth() * 0.5f); }
         if (lvl > 0.0f)
         {
             const auto bar = slot.withTop (slot.getBottom() - lvl * slot.getHeight());
             const auto top = current ? Palette::ink : (on ? Palette::graphite : Palette::pencil);
             const auto bottom = current ? Palette::accentInk : (on ? Palette::scaleInk : Palette::accent);
             g.setGradientFill (juce::ColourGradient (top, 0.0f, bar.getY(), bottom, 0.0f, bar.getBottom(), false));
-            g.fillRoundedRectangle (bar, 2.5f);
+            g.fillRoundedRectangle (bar, juce::jmin (bar.getWidth(), bar.getHeight()) * 0.5f);
         }
         else
         {
             g.setColour (Palette::pencil.withAlpha (0.7f));
-            g.fillRoundedRectangle (slot.getX() + 2.0f, slot.getBottom() - 3.0f, slot.getWidth() - 4.0f, 1.5f, 0.75f);
+            g.fillEllipse (slot.getCentreX() - 1.5f, slot.getBottom() - 4.0f, 3.0f, 3.0f);
         }
         if (current)
         {
@@ -336,22 +336,23 @@ void NoteRow::paint (juce::Graphics& g)
     // Rangée creusée ; la tonique est une touche en saillie. Un point sous
     // chaque note de la gamme.
     const auto all = cellBounds (0).getUnion (cellBounds (11));
-    Relief::inset (g, all, 10.0f, 3.5f);
+    Relief::inset (g, all, all.getHeight() * 0.5f, 4.0f);
     for (int i = 0; i < 12; ++i)
     {
         const auto r = cellBounds (i);
         const bool active = (i == note);
         const bool sharp = juce::String (frame::noteNames[i]).containsChar ('#');
 
+        const float dia = juce::jmin (r.getWidth() - 1.0f, r.getHeight() - 6.0f);
         if (active)
-            Relief::raised (g, r.reduced (1.5f, 5.0f), 7.0f, 3.0f);
+            Relief::raisedEllipse (g, juce::Rectangle<float> (dia, dia).withCentre (r.getCentre()), 3.5f);
         else if (i == hover)
         {
             g.setColour (juce::Colours::white.withAlpha (0.5f));
-            g.fillRoundedRectangle (r.reduced (2.0f, 4.0f), 6.0f);
+            g.fillEllipse (juce::Rectangle<float> (dia, dia).withCentre (r.getCentre()));
         }
 
-        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), sharp ? 11.5f : 14.0f,
+        drawMonoText (g, frame::noteNames[i], r, sharp ? 10.0f : 13.0f,
                       juce::Justification::centred, active ? Palette::ink : (sharp ? Palette::pencil : Palette::graphite), active, 0.0f);
 
         if (frame::maskContains (mask, i))
@@ -565,7 +566,7 @@ void EqView::paint (juce::Graphics& g)
         const float hz = (float) frame::midiToHz (12.0 * (octave + 1) + tonic);
         if (hz < eqLoHz || hz > eqHiHz) continue;
         const float x = xFor (hz);
-        g.setColour (Palette::scaleInk.withAlpha (0.35f));
+        g.setColour (Palette::scaleInk.withAlpha (0.22f));
         g.drawVerticalLine ((int) x, 15.0f, h);
         drawMonoText (g, juce::String (frame::noteNames[juce::jlimit (0, 11, tonic)]) + juce::String (octave),
                       { x - 16.0f, 1.0f, 32.0f, 13.0f }, 10.0f, juce::Justification::centred, Palette::accentInk);
@@ -635,7 +636,7 @@ void EqView::paint (juce::Graphics& g)
         const float r = active ? 9.0f : 7.5f;
         const juce::Rectangle<float> box (p.x - r, p.y - r, 2.0f * r, 2.0f * r);
         // points : petites pastilles en saillie (coupes : carrées, cloches : rondes)
-        if (cut) Relief::raised (g, box, 3.0f, 2.5f, active); else Relief::raisedEllipse (g, box, 2.5f, active);
+        Relief::raisedEllipse (g, box, 2.5f, active);
         g.setColour (engaged || active ? Palette::ink : Palette::graphite);
         if (cut)
         {

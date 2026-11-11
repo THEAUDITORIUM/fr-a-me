@@ -42,7 +42,7 @@ int main (int argc, char** argv)
     const bool showScan = argc > 3 && juce::String (argv[3]) == "scan";
     proc.setIntroDone (! showScan);
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
-    editor->setSize (width, (int) std::round (width * 760.0 / 1000.0));
+    editor->setSize (width, (int) std::round (width * (double) FrameCanvas::designHeight / FrameCanvas::designWidth));
     auto* canvas = dynamic_cast<FrameCanvas*> (editor->getChildComponent (0));
     if (showScan && canvas != nullptr) canvas->openScan();
 

@@ -121,38 +121,44 @@ void FrameCanvas::drawStatic (juce::Graphics& g)
     const float left = soundArea.getX(), right = soundArea.getRight();
 
     // En-tête : le nom, fin et très espacé.
-    drawMonoText (g, "fr(a)me", { left, 22.0f, 400.0f, 46.0f }, 30.0f, J::centredLeft, Palette::ink, false, 0.62f);
+    drawMonoText (g, "fr(a)me", { left, 22.0f, 360.0f, 42.0f }, 26.0f, J::centredLeft, Palette::ink, false, 0.62f);
 
-    // Bandes : puits creusés dans la matière.
-    Relief::inset (g, soundArea.expanded (10.0f, 8.0f), 16.0f, 6.0f);
-    Relief::inset (g, spectrumArea.expanded (10.0f, 8.0f), 16.0f, 6.0f);
+    // Bandes : creux très doux, bords fondus dans la matière.
+    Relief::inset (g, soundArea.expanded (12.0f, 10.0f), 36.0f, 7.0f);
+    Relief::inset (g, spectrumArea.expanded (12.0f, 10.0f), 36.0f, 7.0f);
     auto bandTitle = [&] (const char* text, juce::Rectangle<float> band)
     {
-        drawMonoText (g, text, { band.getX(), band.getY() - 34.0f, 500.0f, 18.0f }, 13.0f, J::centredLeft, Palette::graphite, false, 0.42f);
+        drawMonoText (g, text, { band.getX() + 4.0f, band.getY() - 34.0f, 400.0f, 16.0f }, 11.5f, J::centredLeft, Palette::graphite, false, 0.42f);
     };
     bandTitle ("sound", soundArea);
     bandTitle ("spectrum equalizer", spectrumArea);
     auto legend = [&] (float x, float y, const char* text, juce::Colour c)
     {
         g.setColour (c);
-        g.fillEllipse (x, y - 4.0f, 8.0f, 8.0f);
-        drawMonoText (g, text, { x + 15.0f, y - 8.0f, 110.0f, 16.0f }, 11.0f, J::centredLeft, Palette::pencil, false, 0.3f);
+        g.fillEllipse (x, y - 3.5f, 7.0f, 7.0f);
+        drawMonoText (g, text, { x + 13.0f, y - 7.0f, 100.0f, 14.0f }, 10.0f, J::centredLeft, Palette::pencil, false, 0.3f);
     };
-    legend (right - 236.0f, soundArea.getY() - 25.0f, "dry",    Palette::pencil);
-    legend (right - 120.0f, soundArea.getY() - 25.0f, "in key", Palette::accentInk);
+    legend (right - 196.0f, soundArea.getY() - 26.0f, "dry",    Palette::pencil);
+    legend (right - 100.0f, soundArea.getY() - 26.0f, "in key", Palette::accentInk);
 
-    // Cartes en relief, titres centrés.
-    auto card = [&] (juce::Rectangle<float> r, const char* title)
+    // Titres des quatre zones, centrés au-dessus des commandes.
+    auto zoneTitle = [&] (juce::Rectangle<float> z, const char* t)
     {
-        Relief::raised (g, r, 24.0f, 9.0f);
-        drawMonoText (g, title, { r.getX(), r.getY() + 20.0f, r.getWidth(), 20.0f }, 13.5f, J::centred, Palette::graphite, false, 0.48f);
+        drawMonoText (g, t, { z.getX(), z.getY() - 8.0f, z.getWidth(), 18.0f }, 12.0f, J::centred, Palette::graphite, false, 0.48f);
     };
-    card (harmoCard,  "harmo");
-    card (reverbCard, "reverb");
-    card (gateCard,   "gate");
-    card (keyCard,    "key");
-    drawMonoText (g, "tonic", { keyCard.getX(), (float) noteArea.getY() - 26.0f, keyCard.getWidth(), 16.0f }, 11.0f,
+    zoneTitle (harmoZone,  "harmo");
+    zoneTitle (reverbZone, "reverb");
+    zoneTitle (gateZone,   "gate");
+    zoneTitle (keyZone,    "key");
+    drawMonoText (g, "tonic", { keyZone.getX(), (float) noteArea.getY() - 22.0f, keyZone.getWidth(), 14.0f }, 10.0f,
                   J::centred, Palette::pencil, false, 0.4f);
+
+    // Séparation douce entre les bandes et les commandes : un sillon fondu.
+    {
+        juce::Path groove;
+        groove.addRoundedRectangle (left + 120.0f, 356.0f, right - left - 240.0f, 3.0f, 1.5f);
+        Relief::inset (g, groove, 1.5f);
+    }
 }
 
 void FrameCanvas::paint (juce::Graphics& g)
@@ -171,29 +177,30 @@ void FrameCanvas::paint (juce::Graphics& g)
     }
     g.drawImage (staticLayer, getLocalBounds().toFloat());
 
-    // Gain : valeur sous le petit bouton.
+    // Gain : nom et valeur à droite du petit bouton.
     {
         const auto gr = gainArea.toFloat();
         const float gv = (float) gainKnob.getValue();
-        drawMonoText (g, "gain", { gr.getRight() + 10.0f, gr.getY() + 8.0f, 80.0f, 16.0f }, 11.0f, J::centredLeft, Palette::graphite, false, 0.4f);
+        drawMonoText (g, "gain", { gr.getRight() + 10.0f, gr.getY() + 6.0f, 80.0f, 14.0f }, 10.0f, J::centredLeft, Palette::graphite, false, 0.4f);
         drawMonoText (g, juce::String (gv > 0.05f ? "+" : "") + juce::String (gv, 1) + " db",
-                      { gr.getRight() + 10.0f, gr.getY() + 26.0f, 80.0f, 16.0f }, 12.0f, J::centredLeft, Palette::ink, false, 0.2f);
+                      { gr.getRight() + 10.0f, gr.getY() + 22.0f, 80.0f, 16.0f }, 11.0f, J::centredLeft, Palette::ink, false, 0.2f);
     }
 
     // Valeurs des deux gros boutons.
-    auto value = [&] (const juce::String& t, juce::Rectangle<float> c)
+    auto value = [&] (const juce::String& t, const juce::Rectangle<int>& k)
     {
-        drawMonoText (g, t, { c.getX(), c.getBottom() - 64.0f, c.getWidth(), 28.0f }, 21.0f, J::centred, Palette::ink, false, 0.2f);
+        drawMonoText (g, t, { (float) k.getX() - 20.0f, (float) k.getBottom() + 14.0f, (float) k.getWidth() + 40.0f, 26.0f }, 19.0f,
+                      J::centred, Palette::ink, false, 0.2f);
     };
-    value (juce::String (juce::roundToInt (harmoKnob.getValue())) + " %", harmoCard);
-    value (juce::String (juce::roundToInt (reverbKnob.getValue())) + " %", reverbCard);
+    value (juce::String (juce::roundToInt (harmoKnob.getValue())) + " %", knobArea);
+    value (juce::String (juce::roundToInt (reverbKnob.getValue())) + " %", reverbArea);
 
-    // Carte KEY : la tonalité en clair.
+    // Zone KEY : la tonalité en clair.
     {
         const int t = juce::jlimit (0, 11, noteRow.getNote());
         const bool minor = processor.apvts.getRawParameterValue (ParamIDs::mode)->load() > 0.5f;
         drawMonoText (g, juce::String (frame::noteNames[t]) + (minor ? " minor" : " major"),
-                      { keyCard.getX(), keyCard.getBottom() - 50.0f, keyCard.getWidth(), 28.0f }, 19.0f,
+                      { keyZone.getX(), (float) noteArea.getBottom() + 10.0f, keyZone.getWidth(), 26.0f }, 17.0f,
                       J::centred, Palette::ink, false, 0.3f);
     }
 }
@@ -211,8 +218,8 @@ FrameAudioProcessorEditor::FrameAudioProcessorEditor (FrameAudioProcessor& p)
     setResizable (true, true);
     const double ratio = (double) FrameCanvas::designWidth / FrameCanvas::designHeight;
     getConstrainer()->setFixedAspectRatio (ratio);
-    setResizeLimits (520, (int) (520 / ratio), 1500, (int) (1500 / ratio));
-    setSize (720, (int) (720 / ratio));          // fenêtre plus compacte par défaut
+    setResizeLimits (480, (int) (480 / ratio), 1400, (int) (1400 / ratio));
+    setSize (640, (int) (640 / ratio));          // plus compacte          // fenêtre plus compacte par défaut
 
     startTimerHz (30);
 }

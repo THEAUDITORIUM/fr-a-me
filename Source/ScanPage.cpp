@@ -11,7 +11,7 @@
 
 namespace
 {
-    constexpr float pageW = 1000.0f;
+    constexpr float pageW = 880.0f;
     juce::String keyName (int tonic, int mode)
     {
         if (tonic < 0 || tonic > 11) return "-";
@@ -26,13 +26,13 @@ ScanPage::ScanPage (FrameAudioProcessor& p) : processor (p)
 
 juce::Rectangle<float> ScanPage::buttonBounds() const noexcept
 {
-    return { pageW * 0.5f - 115.0f, 236.0f, 230.0f, 230.0f };
+    return { pageW * 0.5f - 100.0f, 152.0f, 200.0f, 200.0f };
 }
 
-juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 200.0f + 210.0f * (float) i, 568.0f, 190.0f, 38.0f }; }
-juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 200.0f, 630.0f, 190.0f, 44.0f }; }
-juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 10.0f, 630.0f, 190.0f, 44.0f }; }
-juce::Rectangle<float> ScanPage::skipBounds() const noexcept     { return { pageW * 0.5f - 105.0f, 640.0f, 210.0f, 46.0f }; }
+juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 196.0f + 206.0f * (float) i, 452.0f, 186.0f, 38.0f }; }
+juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 196.0f, 506.0f, 186.0f, 44.0f }; }
+juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 10.0f, 506.0f, 186.0f, 44.0f }; }
+juce::Rectangle<float> ScanPage::skipBounds() const noexcept     { return { pageW * 0.5f - 105.0f, 496.0f, 210.0f, 48.0f }; }
 
 void ScanPage::open()
 {
@@ -175,17 +175,17 @@ void ScanPage::paint (juce::Graphics& g)
         juce::Graphics sg (staticLayer);
         sg.addTransform (juce::AffineTransform::scale (scale));
         drawPureBackground (sg, page);
-        drawMonoText (sg, "fr(a)me", { 0.0f, 56.0f, pageW, 46.0f }, 30.0f, J::centred, Palette::ink, false, 0.62f);
+        drawMonoText (sg, "fr(a)me", { 0.0f, 34.0f, pageW, 42.0f }, 26.0f, J::centred, Palette::ink, false, 0.62f);
         for (int i = 0; i < 12; ++i)
         {
             const float a = juce::MathConstants<float>::twoPi * (float) i / 12.0f;
             juce::Path notch;
-            notch.addRoundedRectangle (-4.0f, -(r + 44.0f), 8.0f, 22.0f, 4.0f);
+            notch.addRoundedRectangle (-4.5f, -(r + 46.0f), 9.0f, 24.0f, 4.5f);
             notch.applyTransform (juce::AffineTransform::rotation (a).translated (c.x, c.y));
             Relief::inset (sg, notch, 3.0f);
         }
         // socle creusé dans lequel le disque est posé
-        Relief::insetEllipse (sg, b.expanded (12.0f), 7.0f);
+        Relief::insetEllipse (sg, b.expanded (14.0f), 8.0f);
     }
     g.drawImage (staticLayer, page);
 
@@ -236,8 +236,8 @@ void ScanPage::paint (juce::Graphics& g)
     }
     else if (state == State::done)
         line1 = "not quite ?  try :";
-    drawMonoText (g, line1, { 0.0f, 516.0f, pageW, 20.0f }, 12.0f, J::centred, Palette::graphite, false, 0.36f);
-    drawMonoText (g, line2, { 0.0f, 540.0f, pageW, 18.0f }, 12.0f, J::centred, Palette::pencil, false, 0.3f);
+    drawMonoText (g, line1, { 0.0f, 408.0f, pageW, 20.0f }, 12.0f, J::centred, Palette::graphite, false, 0.36f);
+    drawMonoText (g, line2, { 0.0f, 428.0f, pageW, 18.0f }, 12.0f, J::centred, Palette::pencil, false, 0.3f);
 
     auto pill = [&] (juce::Rectangle<float> rr, const juce::String& t, bool hot)
     {

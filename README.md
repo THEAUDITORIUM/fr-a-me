@@ -408,6 +408,12 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
 
+3.9 : **plus compacte et plus douce**. Planche de 880 × 592 (fenêtre de 640 px par défaut,
+redimensionnable), plus de cartes : les commandes sortent directement de la matière. Relief
+sans rebord : ombres larges et légères, aucun trait de contour, les formes se fondent dans
+la surface ; tout est arrondi (bandes en gélule, touches et points en pastilles rondes,
+barres du gate arrondies).
+
 3.8 : **nouvelle identité « pure »** : tout en blanc, en relief, sans couleur. Les formes
 sont sculptées dans un même matériau mat — en saillie (cartes, boutons, pastilles) ou en
 creux (bandes, rainures, touches) —, avec un grain fin et une lumière qui s'étale depuis le
