@@ -175,7 +175,7 @@ frame/
 │   ├── Visualisers.*         bandes sound (brut + traité) / spectrum / partials
 │   ├── Controls.*            bascule major/minor, bouton « scan key », rangée des 12 notes, EQ façon Pro-Q (EqView)
 │   └── FrameLookAndFeel.*    palette, typographie, potentiomètre
-├── Resources/fonts/          IBM Plex Mono (licence SIL OFL, voir OFL.txt)
+├── Resources/fonts/          Poppins (licence SIL OFL, voir Poppins-OFL.txt)
 └── tests/                    banc de test du moteur, capture de l'interface
 ```
 
@@ -407,6 +407,14 @@ Une planche d'analyse de 1000 × 760 unités, dessinée en vectoriel et mise à 
   (‹ nom du motif ›, les 16 pas éditables avec le pas joué en vert foncé, off / on) ; **mode** (clic sur le mot) ; **tonic** (clic ou glisser le long de la rangée ; un point
   marque chaque note de la gamme) ;
 - en haut à droite : **scan key** (rouvre la page de scan) et **gain** (double-clic = 0 dB).
+
+3.8 : **nouvelle identité « pure »** : tout en blanc, en relief, sans couleur. Les formes
+sont sculptées dans un même matériau mat — en saillie (cartes, boutons, pastilles) ou en
+creux (bandes, rainures, touches) —, avec un grain fin et une lumière qui s'étale depuis le
+centre. Typographie Poppins fine, en capitales très espacées. Page de scan : un grand disque
+en saillie entouré d'encoches pressées dans la matière ; pendant l'écoute, un anneau se
+creuse et la progression s'y dessine. Le fond et les ombres des cartes sont dessinés une
+fois puis gardés en image (aucun coût à l'affichage).
 
 3.7 : **planche allégée, textes plus gros**. Retirés : la bande partials, l'axe du temps,
 « plate », le sous-titre, les décors des marges, le brin dessiné, les traits de rappel et les

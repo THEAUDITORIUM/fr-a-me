@@ -37,7 +37,7 @@ void WaveBand::paint (juce::Graphics& g)
     auto shape = [] (float v) { return std::copysign (std::pow (juce::jmin (1.0f, std::abs (v)), 0.7f), v); };
 
     // son brut : gris léger derrière ; son dans la tonalité : vert, par-dessus
-    g.setColour (source == Source::input ? Palette::ink.withAlpha (0.30f) : Palette::accent.withAlpha (0.85f));
+    g.setColour (source == Source::input ? Palette::pencil.withAlpha (0.6f) : Palette::accentInk.withAlpha (0.42f));
 
     juce::RectangleList<float> bars;
     bars.ensureStorageAllocated (historySize);

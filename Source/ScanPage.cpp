@@ -26,13 +26,13 @@ ScanPage::ScanPage (FrameAudioProcessor& p) : processor (p)
 
 juce::Rectangle<float> ScanPage::buttonBounds() const noexcept
 {
-    return { pageW * 0.5f - 120.0f, 230.0f, 240.0f, 240.0f };
+    return { pageW * 0.5f - 115.0f, 236.0f, 230.0f, 230.0f };
 }
 
-juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 190.0f + 200.0f * (float) i, 556.0f, 170.0f, 28.0f }; }
-juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 190.0f, 600.0f, 170.0f, 34.0f }; }
-juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 20.0f, 600.0f, 170.0f, 34.0f }; }
-juce::Rectangle<float> ScanPage::skipBounds() const noexcept     { return { pageW * 0.5f - 95.0f, 640.0f, 190.0f, 38.0f }; }
+juce::Rectangle<float> ScanPage::altBounds (int i) const noexcept { return { pageW * 0.5f - 200.0f + 210.0f * (float) i, 568.0f, 190.0f, 38.0f }; }
+juce::Rectangle<float> ScanPage::rescanBounds() const noexcept   { return { pageW * 0.5f - 200.0f, 630.0f, 190.0f, 44.0f }; }
+juce::Rectangle<float> ScanPage::continueBounds() const noexcept { return { pageW * 0.5f + 10.0f, 630.0f, 190.0f, 44.0f }; }
+juce::Rectangle<float> ScanPage::skipBounds() const noexcept     { return { pageW * 0.5f - 105.0f, 640.0f, 210.0f, 46.0f }; }
 
 void ScanPage::open()
 {
@@ -162,123 +162,100 @@ void ScanPage::paint (juce::Graphics& g)
 {
     using J = juce::Justification;
     const auto page = getLocalBounds().toFloat();
-    g.fillAll (Palette::paper);
-    drawGardenDecor (g, page, false);
-
-    // En-tête (comme la planche).
-    drawMonoText (g, "fr(a)me", { 0.0f, 60.0f, pageW, 40.0f }, 34.0f, J::centred, Palette::ink, true, 0.28f);
-
-    // Le gros bouton.
     const auto b = buttonBounds();
     const auto c = b.getCentre();
     const float r = b.getWidth() * 0.5f;
 
-    // graduations autour (comme les potentiomètres)
-    for (int i = 0; i < 60; ++i)
+    // Couche fixe : matière blanche, nom, encoches pressées autour du disque.
+    const float scale = juce::jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    if (! staticLayer.isValid() || std::abs (scale - staticScale) > 0.01f)
     {
-        const float a = juce::MathConstants<float>::twoPi * (float) i / 60.0f;
-        const bool major = i % 5 == 0;
-        const float r0 = r + 8.0f, r1 = r + (major ? 16.0f : 12.0f);
-        g.setColour (major ? Palette::ink : Palette::pencil);
-        g.drawLine (c.x + r0 * std::sin (a), c.y - r0 * std::cos (a), c.x + r1 * std::sin (a), c.y - r1 * std::cos (a), major ? 0.9f : 0.6f);
-    }
-
-    if (state == State::done)
-    {
-        g.setColour (Palette::accent);
-        g.fillEllipse (b);
-    }
-    else if (state == State::listening)
-    {
-        const float breathe = 0.18f + 0.10f * std::sin (pulse * 2.0f);
-        g.setColour (Palette::accent.withAlpha (breathe));
-        g.fillEllipse (b);
-        juce::Path arc;
-        arc.addCentredArc (c.x, c.y, r + 2.0f, r + 2.0f, 0.0f, 0.0f, juce::MathConstants<float>::twoPi * juce::jmax (0.002f, progress), true);
-        g.setColour (Palette::accentInk);
-        g.strokePath (arc, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-    else if (hoverButton)
-    {
-        g.setColour (Palette::accent.withAlpha (0.18f));
-        g.fillEllipse (b);
-    }
-    g.setColour (Palette::ink);
-    g.drawEllipse (b, 1.2f);
-    g.setColour (Palette::pencil);
-    g.drawEllipse (b.reduced (14.0f), 0.6f);
-
-    if (state == State::idle)
-    {
-        drawMonoText (g, "scan", b.withTrimmedBottom (20.0f), 40.0f, J::centred, Palette::ink, true, 0.25f);
-        drawMonoText (g, "key finder", b.withTrimmedTop (70.0f), 14.0f, J::centred, Palette::graphite);
-    }
-    else if (state == State::listening)
-    {
-        drawMonoText (g, "listening", b.withTrimmedBottom (30.0f), 22.0f, J::centred, Palette::ink, true, 0.2f);
-        drawMonoText (g, juce::String (juce::roundToInt (progress * 100.0f)) + " %", b.withTrimmedTop (40.0f), 16.0f, J::centred, Palette::graphite);
-    }
-    else
-    {
-        drawMonoText (g, keyName (tonic, mode), b.withTrimmedBottom (20.0f), 30.0f, J::centred, Palette::onAccent, true, 0.12f);
-        drawMonoText (g, "applied", b.withTrimmedTop (70.0f), 14.0f, J::centred, Palette::onAccent);
-    }
-
-    // Texte sous le bouton.
-    juce::String line1, line2;
-    if (state == State::idle)
-    {
-        // repos : aucun texte, le gros bouton suffit
-    }
-    else if (state == State::listening)
-    {
-        if (progress <= 0.0f && listeningTicks > 60)
-            line1 = "no sound yet - press play in your daw";
-        else
-            line1 = "keep playing ...";
-        line2 = tonic >= 0 ? "key : " + keyName (tonic, mode) : juce::String ("key : -");
-        line2 << "      ( click the circle to stop )";
-    }
-    else
-    {
-        line1 = "tonic & mode set : " + keyName (tonic, mode);
-        line2 = "not quite ? try one of these :";
-    }
-    drawMonoText (g, line1, { 0.0f, 500.0f, pageW, 22.0f }, 16.0f, J::centred, Palette::ink);
-    drawMonoText (g, line2, { 0.0f, 528.0f, pageW, 18.0f }, 13.0f, J::centred, Palette::graphite);
-
-    if (state == State::done)
-    {
-        auto pill = [&] (juce::Rectangle<float> rr, const juce::String& t, bool filled)
+        staticScale = scale;
+        staticLayer = juce::Image (juce::Image::ARGB, juce::roundToInt (page.getWidth() * scale), juce::roundToInt (page.getHeight() * scale), true);
+        juce::Graphics sg (staticLayer);
+        sg.addTransform (juce::AffineTransform::scale (scale));
+        drawPureBackground (sg, page);
+        drawMonoText (sg, "fr(a)me", { 0.0f, 56.0f, pageW, 46.0f }, 30.0f, J::centred, Palette::ink, false, 0.62f);
+        for (int i = 0; i < 12; ++i)
         {
-            if (filled) { g.setColour (Palette::accent); g.fillRoundedRectangle (rr, 17.0f); }
-            g.setColour (Palette::ink);
-            g.drawRoundedRectangle (rr, 17.0f, 0.9f);
-            drawMonoText (g, t, rr, 14.0f, J::centred, Palette::ink, filled);
-        };
+            const float a = juce::MathConstants<float>::twoPi * (float) i / 12.0f;
+            juce::Path notch;
+            notch.addRoundedRectangle (-4.0f, -(r + 44.0f), 8.0f, 22.0f, 4.0f);
+            notch.applyTransform (juce::AffineTransform::rotation (a).translated (c.x, c.y));
+            Relief::inset (sg, notch, 3.0f);
+        }
+        // socle creusé dans lequel le disque est posé
+        Relief::insetEllipse (sg, b.expanded (12.0f), 7.0f);
+    }
+    g.drawImage (staticLayer, page);
+
+    // Le disque : en saillie au repos, enfoncé une fois la tonalité trouvée.
+    const bool pressed = state == State::done || (state == State::idle && hoverButton);
+    Relief::raisedEllipse (g, b, pressed ? 6.0f : 12.0f, pressed);
+
+    if (state == State::listening)
+    {
+        // anneau creusé dans le disque, la progression s'y dessine
+        const float ringR = r - 22.0f;
+        juce::Path ring;
+        ring.addEllipse (c.x - ringR, c.y - ringR, ringR * 2.0f, ringR * 2.0f);
+        juce::Path inner;
+        inner.addEllipse (c.x - ringR + 10.0f, c.y - ringR + 10.0f, (ringR - 10.0f) * 2.0f, (ringR - 10.0f) * 2.0f);
+        ring.addPath (inner);
+        ring.setUsingNonZeroWinding (false);
+        Relief::inset (g, ring, 3.0f);
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, ringR - 5.0f, ringR - 5.0f, 0.0f, 0.0f,
+                           juce::MathConstants<float>::twoPi * juce::jmax (0.002f, progress), true);
+        g.setColour (Palette::accentInk.withAlpha (0.75f + 0.25f * std::sin (pulse * 2.0f)));
+        g.strokePath (arc, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    if (state == State::idle)
+    {
+        drawMonoText (g, "scan", b.withTrimmedBottom (14.0f), 30.0f, J::centred, Palette::ink, false, 0.6f);
+        drawMonoText (g, "key", b.withTrimmedTop (70.0f), 12.0f, J::centred, Palette::pencil, false, 0.5f);
+    }
+    else if (state == State::listening)
+    {
+        drawMonoText (g, "listening", b.withTrimmedBottom (26.0f), 15.0f, J::centred, Palette::graphite, false, 0.45f);
+        drawMonoText (g, juce::String (juce::roundToInt (progress * 100.0f)) + " %", b.withTrimmedTop (34.0f), 22.0f, J::centred, Palette::ink, false, 0.2f);
+    }
+    else
+    {
+        drawMonoText (g, keyName (tonic, mode), b.withTrimmedBottom (16.0f), 22.0f, J::centred, Palette::ink, false, 0.32f);
+        drawMonoText (g, "applied", b.withTrimmedTop (64.0f), 11.0f, J::centred, Palette::pencil, false, 0.5f);
+    }
+
+    // Texte sous le disque (écoute / résultat seulement).
+    juce::String line1, line2;
+    if (state == State::listening)
+    {
+        line1 = (progress <= 0.0f && listeningTicks > 60) ? "no sound yet - press play in your daw" : "keep playing";
+        line2 = tonic >= 0 ? keyName (tonic, mode) : juce::String ("-");
+    }
+    else if (state == State::done)
+        line1 = "not quite ?  try :";
+    drawMonoText (g, line1, { 0.0f, 516.0f, pageW, 20.0f }, 12.0f, J::centred, Palette::graphite, false, 0.36f);
+    drawMonoText (g, line2, { 0.0f, 540.0f, pageW, 18.0f }, 12.0f, J::centred, Palette::pencil, false, 0.3f);
+
+    auto pill = [&] (juce::Rectangle<float> rr, const juce::String& t, bool hot)
+    {
+        Relief::raised (g, rr, rr.getHeight() * 0.5f, 4.0f, hot);
+        drawMonoText (g, t, rr, 11.5f, J::centred, Palette::ink, false, 0.32f);
+    };
+    if (state == State::done)
+    {
         for (int i = 0; i < 2; ++i)
             if (altTonic[i] >= 0)
-            {
-                const auto ab = altBounds (i);
-                g.setColour (Palette::pencil);
-                g.drawRoundedRectangle (ab, 14.0f, 0.7f);
-                drawMonoText (g, "or  " + keyName (altTonic[i], altMode[i]), ab, 13.0f, J::centred, Palette::graphite);
-            }
+                pill (altBounds (i), keyName (altTonic[i], altMode[i]), false);
         pill (rescanBounds(), "rescan", false);
-        pill (continueBounds(), "open fr(a)me  >", true);
-        // petite jauge de l'ouverture automatique
+        pill (continueBounds(), "open fr(a)me", false);
         const auto cb = continueBounds();
-        g.setColour (Palette::accentInk);
-        g.fillRect (cb.getX() + 17.0f, cb.getBottom() + 6.0f, (cb.getWidth() - 34.0f) * juce::jlimit (0.0f, 1.0f, (float) doneTicks / 150.0f), 1.5f);
+        g.setColour (Palette::accentInk.withAlpha (0.6f));
+        g.fillRoundedRectangle (cb.getX() + 18.0f, cb.getBottom() + 9.0f,
+                                (cb.getWidth() - 36.0f) * juce::jlimit (0.0f, 1.0f, (float) doneTicks / 150.0f), 2.0f, 1.0f);
     }
     else
-    {
-        // « skip scan » : bien visible ; entre dans la planche, effet actif.
-        const auto sb = skipBounds();
-        g.setColour (hoverSkip ? Palette::accent : Palette::accent.withAlpha (0.35f));
-        g.fillRoundedRectangle (sb, sb.getHeight() * 0.5f);
-        g.setColour (Palette::ink);
-        g.drawRoundedRectangle (sb, sb.getHeight() * 0.5f, 1.1f);
-        drawMonoText (g, "back to fr(a)me  >", sb, 15.0f, J::centred, Palette::ink, true, 0.08f);
-    }
+        pill (skipBounds(), "back to fr(a)me", hoverSkip);
 }

@@ -12,14 +12,14 @@ namespace
     juce::Typeface::Ptr lightFace()
     {
         static juce::Typeface::Ptr tf = juce::Typeface::createSystemTypefaceFor (
-            BinaryData::IBMPlexMonoLight_ttf, BinaryData::IBMPlexMonoLight_ttfSize);
+            BinaryData::PoppinsLight_ttf, BinaryData::PoppinsLight_ttfSize);
         return tf;
     }
 
     juce::Typeface::Ptr regularFace()
     {
         static juce::Typeface::Ptr tf = juce::Typeface::createSystemTypefaceFor (
-            BinaryData::IBMPlexMonoRegular_ttf, BinaryData::IBMPlexMonoRegular_ttfSize);
+            BinaryData::PoppinsRegular_ttf, BinaryData::PoppinsRegular_ttfSize);
         return tf;
     }
 }
@@ -38,7 +38,7 @@ void FrameLookAndFeel::refreshColours()
     setColour (juce::Label::textColourId, Palette::ink);
     setColour (juce::TooltipWindow::backgroundColourId, Palette::paper);
     setColour (juce::TooltipWindow::textColourId, Palette::ink);
-    setColour (juce::TooltipWindow::outlineColourId, Palette::ink);
+    setColour (juce::TooltipWindow::outlineColourId, Palette::pencil);
 }
 
 juce::Font FrameLookAndFeel::mono (float height, bool regularWeight, float tracking)
@@ -47,48 +47,137 @@ juce::Font FrameLookAndFeel::mono (float height, bool regularWeight, float track
     return juce::Font (juce::FontOptions (face).withHeight (height).withKerningFactor (tracking));
 }
 
-void FrameLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
-                                         float pos, float startAngle, float endAngle, juce::Slider& slider)
+//==============================================================================
+//  Relief
+//==============================================================================
+namespace Relief
 {
-    // Potentiomètre minimaliste : cercle au trait fin, graduations d'instrument,
-    // arc et index jaunes.
-    const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height);
-    const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f - 6.0f;
-    const auto c = bounds.getCentre();
-    const float angle = startAngle + pos * (endAngle - startAngle);
-
-    // Graduations : 21 traits, un plus long tous les 5 (0, 25, 50, 75, 100 %).
-    for (int i = 0; i <= 20; ++i)
+    void raised (juce::Graphics& g, const juce::Path& p, float depth, bool pressed)
     {
-        const float a = startAngle + (float) i / 20.0f * (endAngle - startAngle);
-        const bool major = (i % 5) == 0;
-        const float r0 = radius + 2.5f, r1 = radius + (major ? 7.0f : 4.5f);
-        g.setColour (major ? Palette::ink : Palette::pencil);
-        g.drawLine (c.x + r0 * std::sin (a), c.y - r0 * std::cos (a),
-                    c.x + r1 * std::sin (a), c.y - r1 * std::cos (a), major ? 0.9f : 0.6f);
+        const auto b = p.getBounds();
+        const int blur = juce::jmax (2, juce::roundToInt (depth * (pressed ? 1.0f : 2.2f)));
+        const int off  = juce::jmax (1, juce::roundToInt (depth * (pressed ? 0.4f : 0.8f)));
+        // ombre portée (bas droite) puis lumière (haut gauche)
+        juce::DropShadow (Palette::shade.withAlpha (pressed ? 0.35f : 0.55f), blur, { off, off }).drawForPath (g, p);
+        juce::DropShadow (Palette::light.withAlpha (0.95f), blur, { -off, -off }).drawForPath (g, p);
+        // surface : très léger dégradé (plus claire vers la lumière)
+        if (pressed)
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe4e7eb), b.getX(), b.getY(),
+                                                     juce::Colour (0xffeef0f3), b.getRight(), b.getBottom(), false));
+        else
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3f4f6), b.getX(), b.getY(),
+                                                     juce::Colour (0xffe3e6ea), b.getRight(), b.getBottom(), false));
+        g.fillPath (p);
+        g.setColour (Palette::light.withAlpha (0.55f));
+        g.strokePath (p, juce::PathStrokeType (0.8f));
     }
 
-    // Arc de valeur (accent, sous le trait). Bouton bipolaire (pitch) : l'arc
-    // part du zéro, au centre.
-    juce::Path arc;
-    float arcStart = startAngle;
-    if (slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0)
-        arcStart = startAngle + (float) slider.valueToProportionOfLength (0.0) * (endAngle - startAngle);
-    arc.addCentredArc (c.x, c.y, radius - 3.0f, radius - 3.0f, 0.0f, juce::jmin (arcStart, angle), juce::jmax (arcStart, angle), true);
-    g.setColour (Palette::accent);
-    g.strokePath (arc, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+    void inset (juce::Graphics& g, const juce::Path& p, float depth)
+    {
+        const auto b = p.getBounds();
+        g.setColour (juce::Colour (0xffe4e7eb));
+        g.fillPath (p);
 
-    // Cercle au trait fin.
-    g.setColour (Palette::ink);
-    g.drawEllipse (c.x - radius, c.y - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+        // ombre intérieure : le « reste du monde » projette son ombre dans le creux
+        juce::Path outside;
+        outside.addRectangle (b.expanded (depth * 6.0f + 8.0f));
+        outside.addPath (p);
+        outside.setUsingNonZeroWinding (false);
 
-    // Index : trait noir du centre vers le bord + pastille jaune.
-    const juce::Point<float> tip (c.x + (radius - 1.0f) * std::sin (angle), c.y - (radius - 1.0f) * std::cos (angle));
-    g.drawLine (c.x, c.y, tip.x, tip.y, 1.0f);
-    g.setColour (Palette::accentInk);
-    g.fillEllipse (tip.x - 3.0f, tip.y - 3.0f, 6.0f, 6.0f);
-    g.setColour (Palette::ink);
-    g.fillEllipse (c.x - 1.5f, c.y - 1.5f, 3.0f, 3.0f);
+        const int blur = juce::jmax (2, juce::roundToInt (depth * 1.8f));
+        const int off  = juce::jmax (1, juce::roundToInt (depth * 0.7f));
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (p);
+        juce::DropShadow (Palette::shade.withAlpha (0.6f), blur, { off, off }).drawForPath (g, outside);
+        juce::DropShadow (Palette::light.withAlpha (0.95f), blur, { -off, -off }).drawForPath (g, outside);
+    }
+
+    void raised (juce::Graphics& g, juce::Rectangle<float> r, float radius, float depth, bool pressed)
+    {
+        juce::Path p; p.addRoundedRectangle (r, radius); raised (g, p, depth, pressed);
+    }
+    void inset (juce::Graphics& g, juce::Rectangle<float> r, float radius, float depth)
+    {
+        juce::Path p; p.addRoundedRectangle (r, radius); inset (g, p, depth);
+    }
+    void raisedEllipse (juce::Graphics& g, juce::Rectangle<float> r, float depth, bool pressed)
+    {
+        juce::Path p; p.addEllipse (r); raised (g, p, depth, pressed);
+    }
+    void insetEllipse (juce::Graphics& g, juce::Rectangle<float> r, float depth)
+    {
+        juce::Path p; p.addEllipse (r); inset (g, p, depth);
+    }
+}
+
+void drawPureBackground (juce::Graphics& g, juce::Rectangle<float> page)
+{
+    // Lumière au centre (un peu au-dessus), qui s'éteint doucement vers les bords.
+    g.setColour (Palette::paper);
+    g.fillRect (page);
+    const auto c = juce::Point<float> (page.getCentreX(), page.getY() + page.getHeight() * 0.42f);
+    juce::ColourGradient glow (juce::Colour (0xfff7f8f9), c.x, c.y,
+                               juce::Colour (0xffd9dce1), c.x + page.getWidth() * 0.78f, c.y, true);
+    glow.addColour (0.45, juce::Colour (0xffeef0f2));
+    g.setGradientFill (glow);
+    g.fillRect (page);
+
+    // Grain fin, clair et sombre, comme un papier mat photographié.
+    juce::Random rng (0x5eed);
+    const int dots = (int) (page.getWidth() * page.getHeight() * 0.07f);
+    for (int i = 0; i < dots; ++i)
+    {
+        const float x = page.getX() + rng.nextFloat() * page.getWidth();
+        const float y = page.getY() + rng.nextFloat() * page.getHeight();
+        const bool dark = rng.nextBool();
+        g.setColour (dark ? juce::Colour (0xff59606b).withAlpha (0.018f + 0.022f * rng.nextFloat())
+                          : juce::Colours::white.withAlpha (0.05f + 0.07f * rng.nextFloat()));
+        g.fillRect (x, y, 1.0f, 1.0f);
+    }
+}
+
+//==============================================================================
+void FrameLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
+                                         float pos, float startAngle, float endAngle, juce::Slider&)
+{
+    // Bouton sculpté : rainure creusée, arc fin de valeur dans la rainure,
+    // disque en saillie au milieu, index en petite fossette.
+    const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height);
+    const float outer = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f - 3.0f;
+    const auto c = bounds.getCentre();
+    const float angle = startAngle + pos * (endAngle - startAngle);
+    const float depth = juce::jmax (2.0f, outer * 0.09f);
+
+    // rainure (anneau en creux)
+    const float grooveR = outer - depth * 0.5f;
+    Relief::insetEllipse (g, juce::Rectangle<float> (grooveR * 2.0f, grooveR * 2.0f).withCentre (c), depth * 0.6f);
+
+    // arc de valeur dans la rainure
+    const float groove = juce::jmax (3.0f, outer * 0.12f);
+    const float arcR = grooveR - groove * 0.5f - 1.0f;
+    const float arcW = juce::jmax (1.5f, groove * 0.35f);
+    {
+        juce::Path track;
+        track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
+        g.setColour (Palette::faint.darker (0.04f));
+        g.strokePath (track, juce::PathStrokeType (arcW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
+        g.setColour (Palette::accentInk);
+        g.strokePath (arc, juce::PathStrokeType (arcW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    // disque en saillie
+    const float knobR = grooveR - groove - 1.0f;
+    Relief::raisedEllipse (g, juce::Rectangle<float> (knobR * 2.0f, knobR * 2.0f).withCentre (c), depth);
+
+    // index : petite fossette
+    const float dotR = juce::jmax (2.5f, knobR * 0.11f);
+    const float ir = knobR - dotR * 2.4f;
+    const juce::Point<float> tip (c.x + ir * std::sin (angle), c.y - ir * std::cos (angle));
+    Relief::insetEllipse (g, juce::Rectangle<float> (dotR * 2.0f, dotR * 2.0f).withCentre (tip), juce::jmax (1.0f, dotR * 0.5f));
+    g.setColour (Palette::accentInk.withAlpha (0.55f));
+    g.fillEllipse (juce::Rectangle<float> (dotR * 0.9f, dotR * 0.9f).withCentre (tip));
 }
 
 //==============================================================================
@@ -97,117 +186,6 @@ void drawMonoText (juce::Graphics& g, const juce::String& text, juce::Rectangle<
                    bool regularWeight, float tracking)
 {
     g.setColour (colour);
-    g.setFont (FrameLookAndFeel::mono (height, regularWeight, tracking));
-    g.drawText (text.toLowerCase(), area, just, false);
-}
-
-void drawCallout (juce::Graphics& g, const juce::String& label, juce::Point<float> labelPos,
-                  juce::Point<float> target, bool labelOnLeft)
-{
-    const auto font = FrameLookAndFeel::mono (10.0f);
-    juce::GlyphArrangement ga;
-    ga.addLineOfText (font, label.toLowerCase(), 0.0f, 0.0f);
-    const float textW = ga.getBoundingBox (0, -1, true).getWidth();
-
-    // étiquette
-    const float textX = labelOnLeft ? labelPos.x : labelPos.x - textW;
-    drawMonoText (g, label, { textX, labelPos.y - 7.0f, textW + 4.0f, 14.0f }, 10.0f,
-                  juce::Justification::centredLeft, Palette::ink);
-
-    // trait horizontal puis vertical
-    const float lineStart = labelOnLeft ? textX + textW + 8.0f : textX - 8.0f;
-    g.setColour (Palette::ink);
-    g.drawLine (lineStart, labelPos.y, target.x, labelPos.y, 0.7f);
-    g.drawLine (target.x, labelPos.y, target.x, target.y, 0.7f);
-}
-
-//==============================================================================
-namespace
-{
-    // Papier déchiré : rectangle aux bords irréguliers.
-    juce::Path tornRect (juce::Rectangle<float> r, juce::Random& rng)
-    {
-        juce::Path p;
-        const int steps = 18;
-        auto jitter = [&rng] { return (rng.nextFloat() - 0.5f) * 2.2f; };
-        p.startNewSubPath (r.getX(), r.getY());
-        for (int i = 1; i <= steps; ++i) p.lineTo (r.getX() + r.getWidth() * (float) i / steps, r.getY() + jitter());
-        for (int i = 1; i <= steps; ++i) p.lineTo (r.getRight() + jitter(), r.getY() + r.getHeight() * (float) i / steps);
-        for (int i = 1; i <= steps; ++i) p.lineTo (r.getRight() - r.getWidth() * (float) i / steps, r.getBottom() + jitter());
-        for (int i = 1; i <= steps; ++i) p.lineTo (r.getX() + jitter(), r.getBottom() - r.getHeight() * (float) i / steps);
-        p.closeSubPath();
-        return p;
-    }
-
-    // Emplacements des papiers collés dans les marges (communs aux deux thèmes).
-    const juce::Rectangle<float> collageBlocks[] = {
-        { 14.0f, 120.0f, 46.0f, 150.0f }, { 22.0f, 300.0f, 34.0f, 90.0f }, { 940.0f, 140.0f, 42.0f, 120.0f },
-        { 936.0f, 470.0f, 50.0f, 100.0f }, { 18.0f, 470.0f, 40.0f, 70.0f } };
-
-    void paperGrain (juce::Graphics& g, juce::Rectangle<float> page, juce::Random& rng, juce::Colour tint, juce::Colour neutral)
-    {
-        for (int i = 0; i < 1200; ++i)                       // grain léger : le fond reste blanc
-        {
-            const float x = page.getX() + rng.nextFloat() * page.getWidth();
-            const float y = page.getY() + rng.nextFloat() * page.getHeight();
-            const bool tinted = rng.nextFloat() < 0.35f;
-            g.setColour ((tinted ? tint : neutral).withAlpha (0.03f + 0.04f * rng.nextFloat()));
-            g.fillRect (x, y, 1.0f + rng.nextFloat(), 1.0f);
-        }
-    }
-}
-
-namespace
-{
-    // Brin d'herbe couché par le vent : courbe partant du pied (x, y), penchée vers la droite.
-    void grassBlade (juce::Graphics& g, float x, float y, float height, float lean, float width)
-    {
-        juce::Path p;
-        p.startNewSubPath (x, y);
-        p.quadraticTo (x + lean * 0.25f, y - height * 0.6f, x + lean, y - height);
-        g.strokePath (p, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
-}
-
-// Décors volontairement sobres : fond blanc dominant, trois touches de couleur
-// dans les marges, un petit croquis au crayon en haut à gauche.
-namespace { constexpr int decorBlocks[] = { 0, 2, 4 }; }   // haut gauche, haut droite, bas gauche
-
-void drawGardenDecor (juce::Graphics& g, juce::Rectangle<float> page, bool withBlocks)
-{
-    juce::Random rng (0x6a4d3e);
-    paperGrain (g, page, rng, juce::Colour (0xff6c8f3a), juce::Colour (0xff8a8572));
-
-    const juce::Colour greens[] = { juce::Colour (0xff9db86a), juce::Colour (0xff7f9f4a), juce::Colour (0xffc3d4a0) };
-    int k = 0;
-    for (int bi : decorBlocks)
-    {
-        if (! withBlocks) break;
-        const auto b = collageBlocks[bi];
-        const auto path = tornRect (b, rng);
-        g.setColour (greens[k % 3].withAlpha (0.18f));
-        g.fillPath (path);
-        // quelques herbes couchées par le vent
-        g.saveState();
-        g.reduceClipRegion (path);
-        for (int i = 0; i < 22; ++i)
-        {
-            const float x = b.getX() - 6.0f + rng.nextFloat() * (b.getWidth() + 6.0f);
-            const float y = b.getY() + 10.0f + rng.nextFloat() * b.getHeight();
-            const float h = 12.0f + rng.nextFloat() * 14.0f;
-            g.setColour (greens[(k + 1 + i) % 3].darker (0.2f).withAlpha (0.35f));
-            grassBlade (g, x, y, h, h * (0.6f + 0.5f * rng.nextFloat()), 0.6f);
-        }
-        // quelques fleurs des champs roses, très discrètes
-        for (int f = 0; f < 3; ++f)
-        {
-            const float fx = b.getX() + 6.0f + rng.nextFloat() * (b.getWidth() - 12.0f);
-            const float fy = b.getY() + 10.0f + rng.nextFloat() * (b.getHeight() - 20.0f);
-            g.setColour (juce::Colour (0xffe8a3b6).withAlpha (0.55f));
-            g.fillEllipse (fx - 1.6f, fy - 1.6f, 3.2f, 3.2f);
-        }
-        g.restoreState();
-        ++k;
-    }
-
+    g.setFont (FrameLookAndFeel::mono (height * 0.92f, regularWeight, juce::jmax (0.16f, tracking)));
+    g.drawText (text.toUpperCase(), area, just, false);
 }

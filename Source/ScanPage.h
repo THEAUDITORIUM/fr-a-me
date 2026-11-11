@@ -61,4 +61,6 @@ private:
     juce::Rectangle<float> altBounds (int i) const noexcept;
     int listeningTicks = 0, doneTicks = 0;
     bool hoverButton = false, hoverSkip = false;
+    juce::Image staticLayer;                 // fond + encoches (dessinés une fois)
+    float staticScale = 0.0f;
 };

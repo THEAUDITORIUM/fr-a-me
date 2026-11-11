@@ -29,31 +29,26 @@ ModeToggle::ModeToggle (juce::RangedAudioParameter& param)
 juce::Rectangle<float> ModeToggle::optionBounds (int index) const
 {
     auto b = getLocalBounds().toFloat();
-    const float slashW = 26.0f;
+    const float slashW = 0.0f;
     const float optW = (b.getWidth() - slashW) * 0.5f;
     return index == 0 ? b.withWidth (optW) : b.withTrimmedLeft (optW + slashW);
 }
 
 void ModeToggle::paint (juce::Graphics& g)
 {
+    // Rainure creusée ; l'option choisie est une pastille en saillie.
     const char* labels[2] = { "major", "minor" };
-
+    const auto b = getLocalBounds().toFloat().reduced (2.0f);
+    Relief::inset (g, b, b.getHeight() * 0.5f, 3.5f);
     for (int i = 0; i < 2; ++i)
     {
         const auto r = optionBounds (i);
         const bool active = (i == mode);
-
-        if (active)   // surlignage façon marqueur : bande jaune derrière le mot
-        {
-            g.setColour (Palette::accent);
-            g.fillRect (r.reduced (2.0f, r.getHeight() * 0.18f));
-        }
-
-        drawMonoText (g, labels[i], r, 17.0f, juce::Justification::centred,
-                      active ? Palette::onAccent : Palette::pencil, active);
+        if (active)
+            Relief::raised (g, r.reduced (5.0f), (r.getHeight() - 10.0f) * 0.5f, 3.5f);
+        drawMonoText (g, labels[i], r, 14.0f, juce::Justification::centred,
+                      active ? Palette::ink : Palette::pencil, active, 0.3f);
     }
-
-    drawMonoText (g, "/", getLocalBounds().toFloat(), 17.0f, juce::Justification::centred, Palette::pencil);
 }
 
 void ModeToggle::mouseUp (const juce::MouseEvent& e)
@@ -105,7 +100,7 @@ juce::Rectangle<float> GatePanel::rightArrow() const noexcept { return { (float)
 juce::Rectangle<float> GatePanel::stepsArea() const noexcept  { return { 0.0f, 42.0f, (float) getWidth(), (float) getHeight() - 42.0f - 66.0f }; }
 juce::Rectangle<float> GatePanel::toggleOption (int index) const noexcept
 {
-    const float w = 64.0f, slash = 20.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
+    const float w = 70.0f, slash = 0.0f, x0 = ((float) getWidth() - (2.0f * w + slash)) * 0.5f;
     return { x0 + (float) index * (w + slash), (float) getHeight() - 32.0f, w, 30.0f };
 }
 
@@ -157,78 +152,73 @@ void GatePanel::paint (juce::Graphics& g)
         a.startNewSubPath (c.x + (left ? 4.0f : -4.0f), c.y - 8.0f);
         a.lineTo (c.x + (left ? -4.0f : 4.0f), c.y);
         a.lineTo (c.x + (left ? 4.0f : -4.0f), c.y + 8.0f);
-        g.setColour (hot ? Palette::accent : Palette::faint);
-        g.fillEllipse (r.withSizeKeepingCentre (28.0f, 28.0f));
-        g.setColour (Palette::ink);
-        g.strokePath (a, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        Relief::raisedEllipse (g, r.withSizeKeepingCentre (28.0f, 28.0f), 3.0f, hot);
+        g.setColour (Palette::graphite);
+        g.strokePath (a, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     };
     arrow (leftArrow(), true, hover == 0);
     arrow (rightArrow(), false, hover == 1);
     juce::String name (TranceGate::preset (presetIndex).name);
     if (edited) name << " *";
-    drawMonoText (g, name, { 32.0f, 0.0f, (float) getWidth() - 64.0f, 30.0f }, 17.0f, J::centred, Palette::ink, true, 0.06f);
+    drawMonoText (g, name, { 32.0f, 0.0f, (float) getWidth() - 64.0f, 30.0f }, 14.0f, J::centred, Palette::ink, false, 0.3f);
 
     // 16 pas : fente fine, barre verte à la hauteur de la vélocité.
+    // Un seul puits creusé ; les barres y sont posées (gris doux, plus dense
+    // quand le gate est allumé, le pas joué le plus sombre).
     const auto sa = stepsArea();
+    Relief::inset (g, sa.expanded (3.0f), 8.0f, 3.5f);
     const float cw = sa.getWidth() / (float) numSteps;
     for (int i = 0; i < numSteps; ++i)
     {
-        const auto slot = juce::Rectangle<float> (sa.getX() + (float) i * cw + 1.0f, sa.getY(), cw - 2.0f, sa.getHeight());
+        const auto slot = juce::Rectangle<float> (sa.getX() + (float) i * cw + 1.5f, sa.getY() + 3.0f, cw - 3.0f, sa.getHeight() - 6.0f);
         const float lvl = levels[(size_t) i];
         const bool current = on && i == step;
-        if (i == hoverStep) { g.setColour (Palette::accent.withAlpha (0.15f)); g.fillRoundedRectangle (slot, 1.5f); }
-        g.setColour (i == hoverStep ? Palette::pencil : Palette::faint);
-        g.drawRoundedRectangle (slot, 1.5f, 0.6f);
+        if (i == hoverStep) { g.setColour (juce::Colours::white.withAlpha (0.55f)); g.fillRoundedRectangle (slot, 2.5f); }
         if (lvl > 0.0f)
         {
             const auto bar = slot.withTop (slot.getBottom() - lvl * slot.getHeight());
-            g.setColour (current ? Palette::accentInk : (on ? Palette::accent : Palette::accent.withAlpha (0.4f)));
-            g.fillRoundedRectangle (bar, 1.5f);
-            g.setColour (current ? Palette::accentInk : Palette::accentInk.withAlpha (on ? 0.8f : 0.4f));
-            g.fillRect (bar.getX(), bar.getY(), bar.getWidth(), 1.5f);          // trait de vélocité
+            const auto top = current ? Palette::ink : (on ? Palette::graphite : Palette::pencil);
+            const auto bottom = current ? Palette::accentInk : (on ? Palette::scaleInk : Palette::accent);
+            g.setGradientFill (juce::ColourGradient (top, 0.0f, bar.getY(), bottom, 0.0f, bar.getBottom(), false));
+            g.fillRoundedRectangle (bar, 2.5f);
         }
         else
         {
-            g.setColour (Palette::pencil);
-            g.fillRect (slot.getX() + 1.0f, slot.getBottom() - 1.5f, slot.getWidth() - 2.0f, 1.0f);
+            g.setColour (Palette::pencil.withAlpha (0.7f));
+            g.fillRoundedRectangle (slot.getX() + 2.0f, slot.getBottom() - 3.0f, slot.getWidth() - 4.0f, 1.5f, 0.75f);
         }
         if (current)
         {
-            g.setColour (Palette::accentInk);
-            g.fillEllipse (slot.getCentreX() - 2.0f, sa.getBottom() + 3.0f, 4.0f, 4.0f);
+            g.setColour (Palette::ink);
+            g.fillEllipse (slot.getCentreX() - 2.0f, sa.getBottom() + 7.0f, 4.0f, 4.0f);
         }
         else if (i % 4 == 0)
         {
             g.setColour (Palette::pencil);
-            g.fillEllipse (slot.getCentreX() - 1.0f, sa.getBottom() + 4.0f, 2.0f, 2.0f);
+            g.fillEllipse (slot.getCentreX() - 1.25f, sa.getBottom() + 7.75f, 2.5f, 2.5f);
         }
     }
 
     // Pendant l'édition : numéro du pas et vélocité.
     if (editStep >= 0)
         drawMonoText (g, "step " + juce::String (editStep + 1) + "  " + juce::String (juce::roundToInt (levels[(size_t) editStep] * 100.0f)) + " %",
-                      { 0.0f, sa.getBottom() + 12.0f, (float) getWidth(), 16.0f }, 12.0f, J::centred, Palette::graphite);
+                      { 0.0f, sa.getBottom() + 14.0f, (float) getWidth(), 16.0f }, 11.0f, J::centred, Palette::graphite, false, 0.3f);
 
     // off / on (même écriture que major / minor)
+    // off / on : rainure creusée, l'option choisie en saillie (comme major / minor).
     const char* labels[2] = { "off", "on" };
+    const auto t0 = toggleOption (0), t1 = toggleOption (1);
+    const auto track = t0.getUnion (t1).expanded (2.0f, 1.0f);
+    Relief::inset (g, track, track.getHeight() * 0.5f, 3.0f);
     for (int i = 0; i < 2; ++i)
     {
         const auto r = toggleOption (i);
         const bool active = (i == 1) == on;
         if (active)
-        {
-            g.setColour (Palette::accent);
-            g.fillRect (r.reduced (2.0f, r.getHeight() * 0.16f));
-        }
-        else if (hover == 2 + i)
-        {
-            g.setColour (Palette::accent.withAlpha (0.25f));
-            g.fillRect (r.reduced (2.0f, r.getHeight() * 0.16f));
-        }
-        drawMonoText (g, labels[i], r, 17.0f, J::centred, active ? Palette::onAccent : Palette::pencil, active);
+            Relief::raised (g, r.reduced (3.0f), (r.getHeight() - 6.0f) * 0.5f, 3.0f);
+        drawMonoText (g, labels[i], r, 13.0f, J::centred,
+                      active ? Palette::ink : (hover == 2 + i ? Palette::graphite : Palette::pencil), active, 0.3f);
     }
-    const auto t0 = toggleOption (0), t1 = toggleOption (1);
-    drawMonoText (g, "/", { t0.getRight(), t0.getY(), t1.getX() - t0.getRight(), t0.getHeight() }, 17.0f, J::centred, Palette::pencil);
 }
 
 void GatePanel::mouseMove (const juce::MouseEvent& e)
@@ -330,7 +320,7 @@ juce::Rectangle<float> NoteRow::cellBounds (int index) const
 {
     const auto b = getLocalBounds().toFloat();
     const float cellW = b.getWidth() / 12.0f;
-    return { b.getX() + (float) index * cellW, b.getY(), cellW, b.getHeight() - 12.0f };
+    return { b.getX() + (float) index * cellW, b.getY(), cellW, b.getHeight() - 16.0f };
 }
 
 int NoteRow::cellAt (juce::Point<float> p) const
@@ -343,6 +333,10 @@ int NoteRow::cellAt (juce::Point<float> p) const
 
 void NoteRow::paint (juce::Graphics& g)
 {
+    // Rangée creusée ; la tonique est une touche en saillie. Un point sous
+    // chaque note de la gamme.
+    const auto all = cellBounds (0).getUnion (cellBounds (11));
+    Relief::inset (g, all, 10.0f, 3.5f);
     for (int i = 0; i < 12; ++i)
     {
         const auto r = cellBounds (i);
@@ -350,29 +344,21 @@ void NoteRow::paint (juce::Graphics& g)
         const bool sharp = juce::String (frame::noteNames[i]).containsChar ('#');
 
         if (active)
-        {
-            g.setColour (Palette::accent);
-            g.fillRect (r);
-        }
+            Relief::raised (g, r.reduced (1.5f, 5.0f), 7.0f, 3.0f);
         else if (i == hover)
         {
-            g.setColour (Palette::faint.withAlpha (0.6f));
-            g.fillRect (r);
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.fillRoundedRectangle (r.reduced (2.0f, 4.0f), 6.0f);
         }
 
-        // Cases au trait fin ; les altérations légèrement plus basses (clin d'œil au clavier).
-        g.setColour (Palette::ink);
-        g.drawRect (r, 0.7f);
+        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 6.0f : 0.0f), sharp ? 11.5f : 14.0f,
+                      juce::Justification::centred, active ? Palette::ink : (sharp ? Palette::pencil : Palette::graphite), active, 0.0f);
 
-        drawMonoText (g, frame::noteNames[i], r.withTrimmedTop (sharp ? 8.0f : 0.0f), 13.5f,
-                      juce::Justification::centred, active ? Palette::onAccent : Palette::graphite, active, 0.04f);
-
-        // Point sous les notes de la gamme courante (jaune pour la tonique).
         if (frame::maskContains (mask, i))
         {
-            const float cx = r.getCentreX(), cy = r.getBottom() + 6.0f;
-            g.setColour (active ? Palette::accentInk : Palette::ink);
-            g.fillEllipse (cx - 2.5f, cy - 2.5f, 5.0f, 5.0f);
+            const float cx = r.getCentreX(), cy = r.getBottom() + 8.0f;
+            g.setColour (active ? Palette::ink : Palette::pencil);
+            g.fillEllipse (cx - 2.25f, cy - 2.25f, 4.5f, 4.5f);
         }
     }
 }
@@ -425,22 +411,17 @@ ScanButton::ScanButton()
 
 void ScanButton::paint (juce::Graphics& g)
 {
-    const auto b = getLocalBounds().toFloat().reduced (1.0f);
-    const float rr = b.getHeight() * 0.5f;
-    // Bouton principal bien visible : pastille verte pleine.
-    g.setColour (hover ? Palette::accent : Palette::accent.withAlpha (0.55f));
-    g.fillRoundedRectangle (b, rr);
-    g.setColour (Palette::ink);
-    g.drawRoundedRectangle (b, rr, 1.1f);
-    // pictogramme : cercles concentriques (écoute)
-    const float k = b.getHeight() / 26.0f;
-    const juce::Point<float> c (b.getX() + rr + 4.0f, b.getCentreY());
-    g.fillEllipse (c.x - 1.8f * k, c.y - 1.8f * k, 3.6f * k, 3.6f * k);
-    g.drawEllipse (c.x - 4.5f * k, c.y - 4.5f * k, 9.0f * k, 9.0f * k, 1.0f);
-    g.setColour (Palette::accentInk.darker (0.3f));
-    g.drawEllipse (c.x - 7.5f * k, c.y - 7.5f * k, 15.0f * k, 15.0f * k, 1.0f);
-    drawMonoText (g, "SCAN KEY", b.withTrimmedLeft (rr * 2.0f + 4.0f), juce::jmax (11.0f, b.getHeight() * 0.38f),
-                  juce::Justification::centredLeft, Palette::ink, true, 0.08f);
+    const auto b = getLocalBounds().toFloat();
+    // Bouton principal : pastille en saillie ; à gauche, une fossette (écoute).
+    const auto pill = b.reduced (6.0f);
+    const float pr = pill.getHeight() * 0.5f;
+    Relief::raised (g, pill, pr, 5.0f, hover);
+    const juce::Point<float> c (pill.getX() + pr + 2.0f, pill.getCentreY());
+    Relief::insetEllipse (g, juce::Rectangle<float> (pr * 1.15f, pr * 1.15f).withCentre (c), 2.0f);
+    g.setColour (Palette::accentInk);
+    g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (c));
+    drawMonoText (g, "scan key", pill.withTrimmedLeft (pr * 2.0f + 6.0f), 13.0f,
+                  juce::Justification::centredLeft, Palette::ink, true, 0.36f);
 }
 
 void ScanButton::mouseUp (const juce::MouseEvent& e)
@@ -584,7 +565,7 @@ void EqView::paint (juce::Graphics& g)
         const float hz = (float) frame::midiToHz (12.0 * (octave + 1) + tonic);
         if (hz < eqLoHz || hz > eqHiHz) continue;
         const float x = xFor (hz);
-        g.setColour (Palette::scaleInk.withAlpha (0.45f));
+        g.setColour (Palette::scaleInk.withAlpha (0.35f));
         g.drawVerticalLine ((int) x, 15.0f, h);
         drawMonoText (g, juce::String (frame::noteNames[juce::jlimit (0, 11, tonic)]) + juce::String (octave),
                       { x - 16.0f, 1.0f, 32.0f, 13.0f }, 10.0f, juce::Justification::centred, Palette::accentInk);
@@ -638,7 +619,7 @@ void EqView::paint (juce::Graphics& g)
         }
         area.lineTo (w, y0);
         area.closeSubPath();
-        g.setColour (Palette::accent.withAlpha (0.30f));
+        g.setColour (Palette::accentInk.withAlpha (0.10f));
         g.fillPath (area);
         g.setColour (Palette::accentInk);
         g.strokePath (curve, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -651,14 +632,13 @@ void EqView::paint (juce::Graphics& g)
         const bool active = (n == hover || n == dragging);
         const bool cut = (n == 0 || n == numNodes - 1);
         const bool engaged = cut ? (n == 0 ? ProEq::lowCutOn (freq[0]) : ProEq::highCutOn (freq[4])) : std::abs (gain[n]) > 0.05f;
-        const float r = active ? 6.5f : 5.0f;
+        const float r = active ? 9.0f : 7.5f;
         const juce::Rectangle<float> box (p.x - r, p.y - r, 2.0f * r, 2.0f * r);
-        g.setColour (engaged || active ? Palette::accent : Palette::paper);
-        if (cut) g.fillRoundedRectangle (box, 2.0f); else g.fillEllipse (box);       // coupes : carrés, cloches : ronds
+        // points : petites pastilles en saillie (coupes : carrées, cloches : rondes)
+        if (cut) Relief::raised (g, box, 3.0f, 2.5f, active); else Relief::raisedEllipse (g, box, 2.5f, active);
         g.setColour (engaged || active ? Palette::ink : Palette::graphite);
         if (cut)
         {
-            g.drawRoundedRectangle (box, 2.0f, 1.0f);
             // petit pictogramme de pente : ⟋ (coupe basse) / ⟍ (coupe haute)
             const float d = r * 0.5f;
             if (n == 0) g.drawLine (p.x - d, p.y + d, p.x + d, p.y - d, 1.0f);
@@ -666,9 +646,8 @@ void EqView::paint (juce::Graphics& g)
         }
         else
         {
-            g.drawEllipse (box, 1.0f);
-            drawMonoText (g, juce::String (n), box, 7.5f, juce::Justification::centred,
-                          engaged || active ? Palette::onAccent : Palette::graphite, true, 0.0f);
+            drawMonoText (g, juce::String (n), box, 8.0f, juce::Justification::centred,
+                          engaged || active ? Palette::ink : Palette::graphite, true, 0.0f);
         }
     }
 
@@ -682,15 +661,11 @@ void EqView::paint (juce::Graphics& g)
         float tx = juce::jlimit (2.0f, w - tw - 2.0f, p.x - tw * 0.5f);
         float ty = p.y - 26.0f < 2.0f ? p.y + 12.0f : p.y - 26.0f;
         const juce::Rectangle<float> box (tx, ty, tw, 14.0f);
-        g.setColour (Palette::paper.withAlpha (0.94f));
-        g.fillRect (box);
-        g.setColour (Palette::ink);
-        g.drawRect (box, 0.6f);
-        drawMonoText (g, text, box, 8.5f, juce::Justification::centred, Palette::ink);
+        g.setColour (juce::Colours::white.withAlpha (0.92f));
+        g.fillRoundedRectangle (box.expanded (3.0f, 1.0f), 7.0f);
+        drawMonoText (g, text, box, 8.5f, juce::Justification::centred, Palette::ink, false, 0.16f);
     }
 
-    g.setColour (Palette::pencil);
-    g.drawRect (b, 0.6f);
 }
 
 void EqView::mouseMove (const juce::MouseEvent& e)

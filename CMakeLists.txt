@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-project(FRAME VERSION 3.7.0 LANGUAGES C CXX)
+project(FRAME VERSION 3.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -81,8 +81,8 @@ target_sources(Frame PRIVATE
 
 # Police embarquée (IBM Plex Mono, licence SIL OFL — voir Resources/fonts/OFL.txt)
 juce_add_binary_data(FrameBinaryData SOURCES
-    Resources/fonts/IBMPlexMono-Light.ttf
-    Resources/fonts/IBMPlexMono-Regular.ttf)
+    Resources/fonts/Poppins-Light.ttf
+    Resources/fonts/Poppins-Regular.ttf)
 
 target_compile_definitions(Frame PUBLIC
     JUCE_WEB_BROWSER=0

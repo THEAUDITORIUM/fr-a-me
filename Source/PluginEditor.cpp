@@ -112,76 +112,89 @@ void FrameCanvas::refresh()
 }
 
 //==============================================================================
-void FrameCanvas::paint (juce::Graphics& g)
+void FrameCanvas::drawStatic (juce::Graphics& g)
 {
     using J = juce::Justification;
-    g.fillAll (Palette::paper);
-    drawGardenDecor (g, getLocalBounds().toFloat(), false);   // fond garden allégé
+    const auto page = getLocalBounds().toFloat();
+    drawPureBackground (g, page);
 
     const float left = soundArea.getX(), right = soundArea.getRight();
 
-    // ---- En-tête : titre à gauche, scan key et gain à droite --------------------
-    drawMonoText (g, "fr(a)me", { left, 24.0f, 260.0f, 40.0f }, 34.0f, J::centredLeft, Palette::ink, true, 0.22f);
-    {
-        const auto gr = gainArea.toFloat();
-        const float gv = (float) gainKnob.getValue();
-        drawMonoText (g, "GAIN", { gr.getRight() + 8.0f, gr.getY() + 6.0f, 70.0f, 18.0f }, 14.0f, J::centredLeft, Palette::ink, true, 0.08f);
-        drawMonoText (g, juce::String (gv > 0.05f ? "+" : "") + juce::String (gv, 1) + " db",
-                      { gr.getRight() + 8.0f, gr.getY() + 26.0f, 70.0f, 16.0f }, 12.5f, J::centredLeft, Palette::graphite);
-    }
+    // En-tête : le nom, fin et très espacé.
+    drawMonoText (g, "fr(a)me", { left, 22.0f, 400.0f, 46.0f }, 30.0f, J::centredLeft, Palette::ink, false, 0.62f);
 
-    // ---- Bandes : titre bien lisible, légende simple ---------------------------
+    // Bandes : puits creusés dans la matière.
+    Relief::inset (g, soundArea.expanded (10.0f, 8.0f), 16.0f, 6.0f);
+    Relief::inset (g, spectrumArea.expanded (10.0f, 8.0f), 16.0f, 6.0f);
     auto bandTitle = [&] (const char* text, juce::Rectangle<float> band)
     {
-        drawMonoText (g, text, { band.getX(), band.getY() - 26.0f, 400.0f, 20.0f }, 15.0f, J::centredLeft, Palette::ink, true, 0.08f);
+        drawMonoText (g, text, { band.getX(), band.getY() - 34.0f, 500.0f, 18.0f }, 13.0f, J::centredLeft, Palette::graphite, false, 0.42f);
     };
-    bandTitle ("SOUND", soundArea);
-    bandTitle ("SPECTRUM EQUALIZER", spectrumArea);
-
+    bandTitle ("sound", soundArea);
+    bandTitle ("spectrum equalizer", spectrumArea);
     auto legend = [&] (float x, float y, const char* text, juce::Colour c)
     {
         g.setColour (c);
-        g.fillEllipse (x, y - 4.5f, 9.0f, 9.0f);
-        drawMonoText (g, text, { x + 15.0f, y - 8.0f, 100.0f, 16.0f }, 12.5f, J::centredLeft, Palette::graphite);
+        g.fillEllipse (x, y - 4.0f, 8.0f, 8.0f);
+        drawMonoText (g, text, { x + 15.0f, y - 8.0f, 110.0f, 16.0f }, 11.0f, J::centredLeft, Palette::pencil, false, 0.3f);
     };
-    legend (right - 220.0f, soundArea.getY() - 16.0f, "dry", Palette::ink.withAlpha (0.35f));
-    legend (right - 110.0f, soundArea.getY() - 16.0f, "in key", Palette::accent);
+    legend (right - 236.0f, soundArea.getY() - 25.0f, "dry",    Palette::pencil);
+    legend (right - 120.0f, soundArea.getY() - 25.0f, "in key", Palette::accentInk);
 
-    // ---- Cartes de contrôles ------------------------------------------------------
+    // Cartes en relief, titres centrés.
     auto card = [&] (juce::Rectangle<float> r, const char* title)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.75f));
-        g.fillRoundedRectangle (r, 14.0f);
-        g.setColour (Palette::faint.darker (0.08f));
-        g.drawRoundedRectangle (r, 14.0f, 1.2f);
-        g.setColour (Palette::accent);
-        g.fillEllipse (r.getX() + 16.0f, r.getY() + 21.0f, 8.0f, 8.0f);
-        drawMonoText (g, title, { r.getX() + 32.0f, r.getY() + 14.0f, r.getWidth() - 40.0f, 22.0f }, 17.0f,
-                      J::centredLeft, Palette::ink, true, 0.1f);
+        Relief::raised (g, r, 24.0f, 9.0f);
+        drawMonoText (g, title, { r.getX(), r.getY() + 20.0f, r.getWidth(), 20.0f }, 13.5f, J::centred, Palette::graphite, false, 0.48f);
     };
-    card (harmoCard,  "HARMO");
-    card (reverbCard, "REVERB");
-    card (gateCard,   "GATE");
-    card (keyCard,    "KEY");
+    card (harmoCard,  "harmo");
+    card (reverbCard, "reverb");
+    card (gateCard,   "gate");
+    card (keyCard,    "key");
+    drawMonoText (g, "tonic", { keyCard.getX(), (float) noteArea.getY() - 26.0f, keyCard.getWidth(), 16.0f }, 11.0f,
+                  J::centred, Palette::pencil, false, 0.4f);
+}
 
-    // Valeurs des deux gros boutons, en gros.
+void FrameCanvas::paint (juce::Graphics& g)
+{
+    using J = juce::Justification;
+
+    // Couche fixe, à la résolution réelle de l'écran.
+    const float scale = juce::jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    if (! staticLayer.isValid() || std::abs (scale - staticScale) > 0.01f)
+    {
+        staticScale = scale;
+        staticLayer = juce::Image (juce::Image::ARGB, juce::roundToInt (designWidth * scale), juce::roundToInt (designHeight * scale), true);
+        juce::Graphics sg (staticLayer);
+        sg.addTransform (juce::AffineTransform::scale (scale));
+        drawStatic (sg);
+    }
+    g.drawImage (staticLayer, getLocalBounds().toFloat());
+
+    // Gain : valeur sous le petit bouton.
+    {
+        const auto gr = gainArea.toFloat();
+        const float gv = (float) gainKnob.getValue();
+        drawMonoText (g, "gain", { gr.getRight() + 10.0f, gr.getY() + 8.0f, 80.0f, 16.0f }, 11.0f, J::centredLeft, Palette::graphite, false, 0.4f);
+        drawMonoText (g, juce::String (gv > 0.05f ? "+" : "") + juce::String (gv, 1) + " db",
+                      { gr.getRight() + 10.0f, gr.getY() + 26.0f, 80.0f, 16.0f }, 12.0f, J::centredLeft, Palette::ink, false, 0.2f);
+    }
+
+    // Valeurs des deux gros boutons.
     auto value = [&] (const juce::String& t, juce::Rectangle<float> c)
     {
-        drawMonoText (g, t, { c.getX(), c.getBottom() - 62.0f, c.getWidth(), 26.0f }, 20.0f, J::centred, Palette::ink, true);
+        drawMonoText (g, t, { c.getX(), c.getBottom() - 64.0f, c.getWidth(), 28.0f }, 21.0f, J::centred, Palette::ink, false, 0.2f);
     };
     value (juce::String (juce::roundToInt (harmoKnob.getValue())) + " %", harmoCard);
     value (juce::String (juce::roundToInt (reverbKnob.getValue())) + " %", reverbCard);
 
-    // Carte KEY : sous-titre de la tonique, et la tonalité en clair.
-    drawMonoText (g, "tonic", { keyCard.getX() + 16.0f, (float) noteArea.getY() - 24.0f, 120.0f, 16.0f }, 12.0f,
-                  J::centredLeft, Palette::graphite);
+    // Carte KEY : la tonalité en clair.
     {
         const int t = juce::jlimit (0, 11, noteRow.getNote());
         const bool minor = processor.apvts.getRawParameterValue (ParamIDs::mode)->load() > 0.5f;
-        juce::String keyName (frame::noteNames[t]);
-        keyName = keyName.toUpperCase() + (minor ? " minor" : " major");
-        drawMonoText (g, keyName, { keyCard.getX(), keyCard.getBottom() - 46.0f, keyCard.getWidth(), 26.0f }, 20.0f,
-                      J::centred, Palette::accentInk, true, 0.04f);
+        drawMonoText (g, juce::String (frame::noteNames[t]) + (minor ? " minor" : " major"),
+                      { keyCard.getX(), keyCard.getBottom() - 50.0f, keyCard.getWidth(), 28.0f }, 19.0f,
+                      J::centred, Palette::ink, false, 0.3f);
     }
 }
 

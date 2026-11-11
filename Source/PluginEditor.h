@@ -58,6 +58,12 @@ private:
 
     uint16_t shownMask = 0;
 
+    // Couche fixe (fond, puits, cartes en relief, titres) : dessinée une fois,
+    // gardée en image — les ombres douces ne coûtent rien à l'affichage.
+    void drawStatic (juce::Graphics&);
+    juce::Image staticLayer;
+    float staticScale = 0.0f;
+
     // Géométrie (unités de conception) — 3.7 : planche allégée, textes plus gros.
     // En-tête (titre, scan key, gain), deux bandes (sound, spectrum equalizer),
     // puis quatre cartes de contrôles : HARMO, REVERB, GATE, KEY.
