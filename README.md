@@ -229,6 +229,14 @@ tenue désaccordée de +39 cents 1 % → 99 % ; glissando 32 % → 100 % ; vibra
 désaccordés recalés, niveau conservé à ±1 dB, plus de pompage. Traînées entre les accords
 divisées par plus de deux (+6 dB au lieu de +10 dB).
 
+**SCAN RAPIDE 3.6** : le scan ne dure plus 8 s fixes. Une analyse toutes les ~23 ms, et
+il s'arrête dès que la gamme en tête est sûre : nette avance sur les autres gammes tenue
+0.5 s, ou avance moyenne tenue 1.5 s (après au moins 1 s de son) ; au plus 6 s si le
+morceau reste ambigu. Sur les 260 morceaux de test : **2 s en moyenne** (1.4 s médiane,
+60 % en 2 s ou moins) au lieu de 8.1 s, la tonalité exacte trouvée plus souvent qu'avant
+(190 contre 172), la bonne gamme 220 fois (229 avant). Sur un vrai morceau (batterie,
+basse, mix) : ré majeur trouvé en 2 s.
+
 **SCAN 3.1** (`KeyDetector`) : pendant un scan, on n'entend **que le son d'origine** (rien de
 fr(a)me) ; une fois la tonalité trouvée et appliquée, l'effet revient en fondu (150 ms).
 L'entrée est analysée par FFT (8192 points) : pics de 70 Hz à 5 kHz, **harmoniques écartées**

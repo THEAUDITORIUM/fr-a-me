@@ -17,8 +17,10 @@
       • Score de chacune des 24 tonalités : ressemblance au profil de
         Albrecht & Shanahan + part de l'énergie dans sa gamme + poids de la
         tonique à la basse. Les deux suivantes sont proposées.
-      • Le scan s'arrête de lui-même après ~8 s de son réellement joué (les
-        silences ne comptent pas).
+      • (3.6) Scan rapide : une analyse toutes les ~23 ms, et arrêt dès que la
+        gamme en tête est sûre — nette avance tenue 0.5 s, ou avance moyenne
+        tenue 1.5 s (après au moins 1 s de son) ; au plus 6 s de son joué
+        (les silences ne comptent pas). ~2 s en moyenne au lieu de 8.
 
     Fil audio : push() ne fait que copier et, une fois par saut, une FFT
     (aucune allocation). Fil interface : start(), lecture des résultats
@@ -37,7 +39,7 @@
 class KeyDetector
 {
 public:
-    static constexpr float targetSeconds = 8.0f;     // son joué nécessaire
+    static constexpr float targetSeconds = 6.0f;     // son joué au plus (arrêt dès que la tonalité est sûre)
 
     void prepare (double sampleRate);
 
@@ -62,6 +64,8 @@ public:
     struct Candidate { int tonic = -1, mode = 0; double score = -1.0e9; };
     static void rankKeys (const std::array<double, 12>& chroma, const std::array<double, 12>& bass,
                           std::array<Candidate, 3>& top) noexcept;
+    static void rankKeys (const std::array<double, 12>& chroma, const std::array<double, 12>& bass,
+                          std::array<Candidate, 3>& top, std::array<double, 24>& all) noexcept;
 
     /** Calcul hors temps réel (tests) : tonalité d'un profil chroma. */
     static void bestKey (const std::array<double, 12>& chroma, const std::array<double, 12>& bass,
@@ -71,6 +75,8 @@ public:
     const std::array<double, 12>& debugChroma() const noexcept { return chroma; }
     const std::array<double, 12>& debugBass() const noexcept   { return bassChroma; }
     double debugTuning() const noexcept { return tuningCents; }
+    double debugMargin() const noexcept { return lastMargin; }
+    double debugActive() const noexcept { return activeSeconds; }
 
 private:
     void analyseFrame() noexcept;
@@ -87,7 +93,9 @@ private:
     double tuningCents = 0.0;
     static void fold (const std::array<double, fineBins>& f, const std::array<double, fineBins>& fb,
                       std::array<double, 12>& c, std::array<double, 12>& b, double& tuning) noexcept;
-    double activeSeconds = 0.0;
+    double activeSeconds = 0.0, stableSince = 0.0;
+    int lastTop = -1;
+    double lastMargin = 0.0;
 
     std::atomic<bool> startRequested { false }, cancelRequested { false };
     std::atomic<bool> scanning { false }, done { false };

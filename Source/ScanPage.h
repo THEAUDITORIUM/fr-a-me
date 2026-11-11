@@ -9,7 +9,7 @@
     Rouvrable à tout moment avec le petit bouton « scan key » de la planche.
 
       • repos      : « appuyez sur scan, puis jouez votre mélodie »
-      • écoute     : anneau de progression (~8 s de son joué), tonalité en
+      • écoute     : anneau de progression (~2 s de son joué en moyenne, 6 s au plus), tonalité en
                      direct ; un clic sur le bouton arrête et garde le résultat
       • (3.2) tant qu'aucun scan n'est terminé (ou passé avec « skip scan »),
                      fr(a)me laisse passer le son d'origine, sans effet

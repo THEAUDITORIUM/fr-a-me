@@ -7,6 +7,31 @@
 #include "KeyDetector.h"
 #include <cmath>
 
+// Scan rapide (3.6) : analyse plus serrée et arrêt dès que la tonalité est sûre.
+// Réglé sur 260 morceaux de test + deux morceaux réels : 2 s en moyenne (1.4 s
+// médiane) au lieu de 8 s, tonalité exacte plus souvent qu'avant.
+#ifndef KD_HOPDIV
+ #define KD_HOPDIV 8         // une analyse tous les 1/8 de trame (~23 ms)
+#endif
+#ifndef KD_MIN
+ #define KD_MIN 1.0          // son joué minimum (s)
+#endif
+#ifndef KD_STABLE
+ #define KD_STABLE 0.5       // la même tonalité en tête pendant … (s de son joué)
+#endif
+#ifndef KD_MARGIN
+ #define KD_MARGIN 0.25      // avance de score minimale sur la 2e tonalité
+#endif
+#ifndef KD_T2H
+ #define KD_T2H 1.5          // ou : en tête depuis … s avec une avance moyenne
+#endif
+#ifndef KD_T2M
+ #define KD_T2M 0.12
+#endif
+#ifndef KD_MAX
+ #define KD_MAX 6.0          // au plus (s de son joué)
+#endif
+
 namespace
 {
     // Profils de tonalité d'Albrecht & Shanahan (2013), tonique = indice 0.
@@ -33,7 +58,7 @@ void KeyDetector::prepare (double newSampleRate)
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
     fftOrder = sampleRate > 60000.0 ? 14 : 13;            // ~0.17 s, résolution ~5 Hz
     fftSize = 1 << fftOrder;
-    hop = fftSize / 2;
+    hop = fftSize / KD_HOPDIV;
     fft = std::make_unique<juce::dsp::FFT> (fftOrder);
     ring.assign ((size_t) fftSize, 0.0f);
     work.assign ((size_t) fftSize * 2, 0.0f);
@@ -52,6 +77,8 @@ void KeyDetector::resetAccumulators() noexcept
     fineBass.fill (0.0);
     tuningCents = 0.0;
     activeSeconds = 0.0;
+    stableSince = 0.0;
+    lastTop = -1;
     progress.store (0.0f);
     confidence.store (0.0f);
     tonic.store (-1);
@@ -179,7 +206,8 @@ void KeyDetector::analyseFrame() noexcept
     activeSeconds += (double) hop / sampleRate;
 
     std::array<Candidate, 3> top;
-    rankKeys (chroma, bassChroma, top);
+    std::array<double, 24> all {};
+    rankKeys (chroma, bassChroma, top, all);
     tonic.store (top[0].tonic);
     mode.store (top[0].mode);
     for (int i = 0; i < 2; ++i)
@@ -189,9 +217,40 @@ void KeyDetector::analyseFrame() noexcept
     }
     confidence.store (top[1].tonic >= 0 ? (float) juce::jlimit (0.0, 1.0, (top[0].score - top[1].score) * 4.0) : 0.0f);
 
-    const float p = (float) juce::jlimit (0.0, 1.0, activeSeconds / (double) targetSeconds);
-    progress.store (p);
-    if (p >= 1.0f)
+    // Arrêt anticipé : la même tonalité en tête depuis KD_STABLE s, avec assez
+    // d'avance, après au moins KD_MIN s de son ; sinon au plus KD_MAX s.
+    const int topKey = top[0].tonic * 2 + top[0].mode;
+    if (topKey != lastTop) { lastTop = topKey; stableSince = activeSeconds; }
+    // Avance de la GAMME en tête (les notes jouées par l'harmonie) sur la
+    // meilleure autre gamme : majeur et mineur relatif comptent ensemble.
+    std::array<double, 12> setScore {};
+    setScore.fill (-1.0e9);
+    for (int t = 0; t < 12; ++t)
+        for (int m = 0; m < 2; ++m)
+        {
+            const int root = m == 0 ? t : (t + 3) % 12;
+            setScore[(size_t) root] = juce::jmax (setScore[(size_t) root], all[(size_t) (t * 2 + m)]);
+        }
+    const int topSet = top[0].mode == 0 ? top[0].tonic : (top[0].tonic + 3) % 12;
+    double other = -1.0e9;
+    for (int r = 0; r < 12; ++r) if (r != topSet) other = juce::jmax (other, setScore[(size_t) r]);
+    const double margin = top[0].tonic >= 0 ? setScore[(size_t) topSet] - other : 0.0;
+    lastMargin = margin;
+    const double held = activeSeconds - stableSince;
+    // Plus l'avance est nette, plus on s'arrête tôt ; une avance modeste doit
+    // tenir plus longtemps (musique dense : batterie, basse, mix).
+    const bool sure = activeSeconds >= KD_MIN
+                   && ((held >= KD_STABLE && margin >= KD_MARGIN)
+                    || (held >= KD_T2H && margin >= KD_T2M));
+
+    const double pMin = juce::jmin (1.0, activeSeconds / KD_MIN);
+    const double needHeld = margin >= KD_MARGIN ? KD_STABLE : KD_T2H;
+    const double pHeld = juce::jmin (1.0, held / needHeld) * (margin >= KD_T2M ? 1.0 : 0.5);
+    double p = juce::jmax (activeSeconds / KD_MAX, 0.5 * pMin + 0.45 * pHeld);
+    p = juce::jmax ((double) progress.load(), juce::jmin (0.97, p));      // ne recule jamais
+    if (sure || activeSeconds >= KD_MAX) p = 1.0;
+    progress.store ((float) p);
+    if (p >= 1.0)
     {
         scanning.store (false);
         done.store (true);
@@ -230,6 +289,14 @@ void KeyDetector::fold (const std::array<double, fineBins>& f, const std::array<
 void KeyDetector::rankKeys (const std::array<double, 12>& c, const std::array<double, 12>& bass,
                             std::array<Candidate, 3>& top) noexcept
 {
+    std::array<double, 24> all {};
+    rankKeys (c, bass, top, all);
+}
+
+void KeyDetector::rankKeys (const std::array<double, 12>& c, const std::array<double, 12>& bass,
+                            std::array<Candidate, 3>& top, std::array<double, 24>& all) noexcept
+{
+    all.fill (-1.0e9);
     // Score de chaque tonalité (24) : ressemblance au profil de tonalité
     // + part de l'énergie dans sa gamme + poids de la tonique à la basse.
     // Réglé sur un banc de 260 morceaux de test (mélodies seules, accords,
@@ -253,6 +320,7 @@ void KeyDetector::rankKeys (const std::array<double, 12>& c, const std::array<do
             const double score = correlation (soft, m == 0 ? majorProfile : minorProfile, t)
                                + 1.0 * in / total
                                + 0.3 * (bassTotal > 0.0 ? bass[(size_t) t] / bassTotal : 0.0);
+            all[(size_t) (t * 2 + m)] = score;
             Candidate cand { t, m, score };
             for (int i = 0; i < 3; ++i)
                 if (top[(size_t) i].tonic < 0 || score > top[(size_t) i].score)
